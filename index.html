@@ -337,7 +337,24 @@ const audio = {
     if(name==='level'){ this.tone(392,0.28,'triangle',0.12); setTimeout(()=>this.tone(587,0.36,'triangle',0.12),90); return; }
     if(name==='boss'){ this.tone(70,0.62,'sawtooth',0.18,this.sfx,-18); this.noise(t,0.55,0.10,280,'lowpass'); return; }
     if(name==='quest'){ this.tone(330,0.22,'triangle',0.11); setTimeout(()=>this.tone(495,0.28,'triangle',0.1),120); return; }
-    if(name==='death'){ this.tone(110,0.85,'sawtooth',0.14,this.sfx,-70); this.noise(t,0.72,0.12,240,'lowpass'); }
+    if(name==='death'){ this.tone(110,0.85,'sawtooth',0.14,this.sfx,-70); this.noise(t,0.72,0.12,240,'lowpass'); return; }
+    if(name==='bossPhase'){ this.tone(58,0.48,'sawtooth',0.16,this.sfx,-22); this.tone(92,0.38,'triangle',0.09,this.sfx,40); this.noise(t,0.32,0.11,320,'lowpass'); return; }
+    if(name==='hitFire'){ this.noise(t,0.11,0.14,520,'bandpass'); this.tone(180,0.08,'sawtooth',0.07,this.sfx,90); return; }
+    if(name==='hitFrost'){ this.tone(620,0.14,'triangle',0.08,this.sfx,-120); this.noise(t,0.12,0.09,2400,'highpass'); return; }
+    if(name==='hitLightning'){ this.tone(420,0.06,'square',0.09,this.sfx,-180); this.noise(t,0.07,0.16,1800,'highpass'); return; }
+    if(name==='hitRage'){ this.tone(240,0.07,'triangle',0.08,this.sfx,60); this.noise(t,0.08,0.11,900,'bandpass'); return; }
+    if(name==='footGrass'){ this.noise(t,0.05,0.04,680,'lowpass'); return; }
+    if(name==='footDirt'){ this.noise(t,0.06,0.05,420,'bandpass'); return; }
+    if(name==='footStone'){ this.tone(180,0.04,'triangle',0.04,this.sfx,-40); this.noise(t,0.05,0.05,1100,'bandpass'); return; }
+    if(name==='footDungeon'){ this.noise(t,0.055,0.045,780,'bandpass'); this.tone(120,0.03,'sine',0.03,this.sfx,-20); return; }
+  },
+  hitPlay(element){
+    const map={firebolt:'hitFire',flamewave:'hitFire',flame:'hitFire',nova:'hitFrost',lightning:'hitLightning',ragebolt:'hitRage',rage:'hitRage',ward:'hit'};
+    this.sfxPlay(map[element]||'hit');
+  },
+  footstepPlay(surface){
+    const map={grass:'footGrass',dirt:'footDirt',stone:'footStone',dungeon:'footDungeon'};
+    this.sfxPlay(map[surface]||'footDungeon');
   }
 };
 
@@ -399,7 +416,13 @@ function genDungeon(depth){
       props.push({kind:p.kind, x:(r.x+p.rx*r.w)*TILE+TILE*0.5, y:(r.y+p.ry*r.h)*TILE+TILE*0.5});
     }
   }
-  return {W,H,grid,rooms,landmarks,props,
+  const gyRoom = rooms[Math.min(rooms.length-1, 1 + Math.floor(rooms.length/3))];
+  const graveyard = { x:(gyRoom.cx+0.5)*TILE, y:(gyRoom.cy+0.5)*TILE, room:rooms.indexOf(gyRoom) };
+  landmarks.push({
+    kind:'graveyard', x:graveyard.x, y:graveyard.y,
+    room:graveyard.room, name:'Graveyard of Echoes'
+  });
+  return {W,H,grid,rooms,landmarks,props,graveyard,
     solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1 };
 }
 
@@ -622,8 +645,9 @@ function newPlayer(){
     moveTx:null, moveTy:null,
     dodge:0, dodgeCd:0, dodgeDx:0, dodgeDy:0,
     castCd:0, novaCd:0, lightCd:0, waveCd:0, wardCd:0, ward:0, castFlash:0, castAbility:'rage', hurt:0, trail:[],
-    animPhase:0, equipFlash:0,
-    dead:false,
+    animPhase:0, equipFlash:0, footT:0,
+    slow:0, poison:0, poisonDps:0,
+    dead:false, dying:false, deathT:0, deathDur:0.54, deathFrame:0,
   };
 }
 // derive totals from gear
@@ -665,6 +689,110 @@ const MTYPES = {
   demon:    { name:'Ember Demon',  r:14, hp:58,  dmg:12, speed:104, col:'#b44230', xp:12, atkCd:1.05, range:185, role:'caster' },
   brute:    { name:'Grave Brute',  r:21, hp:125, dmg:20, speed:62,  col:'#b8aa86', xp:22, atkCd:1.55, range:42,  role:'charger' },
 };
+const ELITE_AFFIX_POOL = [
+  {id:'molten',   label:'Molten',   col:'#ff6a32'},
+  {id:'vampiric', label:'Vampiric', col:'#c04068'},
+  {id:'fast',     label:'Fast',     col:'#ffe06a'},
+  {id:'frost',    label:'Frost',    col:'#7fd8ff'},
+  {id:'arcane',   label:'Arcane',   col:'#b06aff'},
+  {id:'plague',   label:'Plague',   col:'#6ac838'},
+];
+function eliteHas(m,id){ return !!(m.elite && m.affixes && m.affixes.includes(id)); }
+function eliteAffixCol(id){ return (ELITE_AFFIX_POOL.find(a=>a.id===id)||{col:'#d9b45a'}).col; }
+function elitePrimaryCol(m){
+  if(!m.elite||!m.affixes?.length) return '#d9b45a';
+  return eliteAffixCol(m.affixes[0]);
+}
+function eliteDisplayName(m){
+  if(!m.elite||!m.affixes?.length) return m.name;
+  const labels=m.affixes.map(id=>(ELITE_AFFIX_POOL.find(a=>a.id===id)||{label:id}).label);
+  return labels.join(' ')+' '+m.name;
+}
+function rollMonsterEliteAffixes(){
+  const pool=ELITE_AFFIX_POOL.slice();
+  const n=chance(0.34)?2:1;
+  const out=[];
+  for(let i=0;i<n && pool.length;i++){
+    const pickIdx=randi(0,pool.length-1);
+    out.push(pool[pickIdx].id);
+    pool.splice(pickIdx,1);
+  }
+  return out;
+}
+function eliteSpawnChance(){
+  if(!game || game.scene==='forest' || game.scene==='camp') return 0;
+  return clamp(0.08+game.depth*0.008,0.08,0.12);
+}
+function applyEliteToMonster(m){
+  m.elite=true;
+  m.affixes=rollMonsterEliteAffixes();
+  m.baseName=m.name;
+  m.baseCol=m.col;
+  m.eliteScale=rand(1.15,1.25);
+  m.r=Math.round(m.r*m.eliteScale);
+  const hpMul=rand(2.0,2.5);
+  m.hp=Math.round(m.hp*hpMul);
+  m.maxhp=m.hp;
+  m.dmg=Math.ceil(m.dmg*rand(1.3,1.5));
+  m.xp=Math.ceil(m.xp*1.75);
+  m.eliteWindMul=1;
+  m.eliteSpeedMul=1;
+  if(eliteHas(m,'arcane')){ m.dmg=Math.ceil(m.dmg*1.22); m.col='#9a68d8'; }
+  if(eliteHas(m,'fast')){ m.speed=Math.round(m.speed*1.35); m.atkCd*=0.82; m.eliteWindMul=0.72; m.eliteSpeedMul=1.12; }
+  if(eliteHas(m,'molten')) m.col='#c85a30';
+  if(eliteHas(m,'frost')) m.col=eliteHas(m,'arcane')?'#88a8e8':'#88c8e8';
+  if(eliteHas(m,'plague')) m.col=eliteHas(m,'arcane')?'#78a858':'#6a9a48';
+  if(eliteHas(m,'vampiric') && !eliteHas(m,'arcane') && !eliteHas(m,'molten')) m.col='#a85878';
+  m.name=eliteDisplayName(m);
+  m.auraCol=elitePrimaryCol(m);
+  return m;
+}
+function tryMakeElite(m){
+  if(m.boss||m.tutorial||m.elite) return m;
+  if(!chance(eliteSpawnChance())) return m;
+  return applyEliteToMonster(m);
+}
+function eliteOnPlayerHit(m,p,dmg,melee){
+  if(!m.elite) return;
+  if(eliteHas(m,'vampiric')){
+    const heal=Math.max(1,Math.ceil(dmg*0.35));
+    m.hp=Math.min(m.maxhp,m.hp+heal);
+    addFloat(m.x,m.y-m.r-10,'+'+heal,'#ff7090');
+    monsterSpark(m.x,m.y,'#c04068',4);
+  }
+  if(melee){
+    if(eliteHas(m,'frost')){ p.slow=Math.max(p.slow||0,2.2); addFloat(p.x,p.y-28,'Chilled','#7fd8ff'); }
+    if(eliteHas(m,'plague')){ p.poison=Math.max(p.poison||0,4); p.poisonDps=Math.max(p.poisonDps||0,3+Math.floor(game.depth*0.4)); addFloat(p.x,p.y-40,'Plague','#6ac838'); }
+  }
+}
+function eliteMoltenTrail(m,dt,moved){
+  if(!eliteHas(m,'molten')||!moved) return;
+  m.moltenCd=(m.moltenCd||0)-dt;
+  if(m.moltenCd>0) return;
+  m.moltenCd=0.11;
+  game.fx.push({kind:'decal',sub:'fire',x:m.x+rand(-5,5),y:m.y+rand(-4,4),r:rand(10,16),rot:rand(0,6.28),life:1.4,t:0,col:'rgba(255,90,40,0.34)'});
+  if(dist(m.x,m.y,game.player.x,game.player.y)<18+game.player.r) damagePlayer(game.player,Math.ceil(2+game.depth*0.5));
+}
+function eliteMoltenDeath(m){
+  if(!eliteHas(m,'molten')) return;
+  const p=game.player, rad=m.r+52;
+  game.fx.push({kind:'shockwave',x:m.x,y:m.y,r:8,max:rad,life:0.42,t:0,col:'#ff6a32'});
+  game.fx.push({kind:'nova',x:m.x,y:m.y,r:10,max:rad,life:0.34,t:0,col:'#ff4a22'});
+  spatter(m.x,m.y,'#ff6a32',14);
+  if(dist(m.x,m.y,p.x,p.y)<rad+p.r) damagePlayer(p,Math.ceil(m.dmg*0.85));
+  addFloat(m.x,m.y-m.r-14,'MOLTEN BURST','#ff6a32');
+}
+function rollEliteLoot(depth){
+  const it=rollItem(depth+1);
+  if(it.rarity.n<2 && chance(0.55)){
+    const bump=RARITIES[Math.min(RARITIES.length-1,it.rarity.n+1)];
+    it.rarity=bump;
+    const noun=pick(ITEM_NOUNS[it.slot]);
+    it.name=(bump.n>=2?pick(ITEM_ADJ)+' ':bump.name?bump.name+' ':'')+noun;
+    it.score+=bump.n*10;
+  }
+  return it;
+}
 function spawnMonster(type, x, y, depth){
   const t = MTYPES[type];
   const scale = 1 + depth*0.28;
@@ -673,7 +801,7 @@ function spawnMonster(type, x, y, depth){
     dmg: Math.round(t.dmg*(1+depth*0.2)),
     flinch:0, slow:0, atk:rand(0,0.6), hurt:0, dead:false, dying:false, deathT:0, deathDur:0.38, deathFrame:0, wind:0,
     aiCd:rand(0.2,0.9), charge:0, chargeDx:0, chargeDy:0, slam:0, phase:1, born:0,
-    facing:1, animFrame:0, animTimer:0 };
+    facing:1, animFrame:0, animTimer:0, elite:false, affixes:[] };
 }
 
 function saveKey(slot){ return SAVE_PREFIX+slot; }
@@ -817,7 +945,7 @@ function buildFloor(){
       if(roll<0.34) type='skeleton';
       else if(roll>0.92 && game.depth>=1) type='brute';
       else if(roll>0.78 && game.depth>=2) type='demon';
-      game.monsters.push(spawnMonster(type, mx, my, game.depth));
+      game.monsters.push(tryMakeElite(spawnMonster(type, mx, my, game.depth)));
     }
   }
   for(const lm of d.landmarks||[]){
@@ -905,7 +1033,7 @@ function tryNova(p){
     if(m.dead) continue;
     const dd = dist(p.x,p.y,m.x,m.y);
     if(dd < R + m.r){
-      hitMonster(m, Math.round(dmg*rand(0.9,1.1)), p.x, p.y, 220, '#8fd8ff');
+      hitMonster(m, Math.round(dmg*rand(0.9,1.1)), p.x, p.y, 220, '#8fd8ff', 'nova');
       m.slow = 2.2 + talentRank(p,'frost')*0.25;
     }
   }
@@ -962,7 +1090,7 @@ function tryLightning(p){
   let from={x:p.x,y:p.y};
   for(const m of targets){
     const dmg=Math.round((p.baseSpell*1.05+p.level*2) * p.spellMul * rand(0.9,1.14));
-    hitMonster(m,dmg,from.x,from.y,120,'#ffe06a');
+    hitMonster(m,dmg,from.x,from.y,120,'#ffe06a','lightning');
     game.fx.push({kind:'spark',x:m.x,y:m.y,dx:0,dy:-1,speed:20,life:0.2,t:0,col:'#ffe06a'});
     game.fx.push({kind:'lightning',x1:from.x,y1:from.y,x2:m.x,y2:m.y,life:0.16,t:0,col:'#ffe06a'});
     from=m;
@@ -971,7 +1099,7 @@ function tryLightning(p){
   audio.sfxPlay('firebolt');
 }
 function useSkill(n){
-  if(!game || !game.player || game.invOpen || game.talentOpen || game.attrOpen) return;
+  if(!game || !game.player || game.player.dying || game.player.dead || game.invOpen || game.talentOpen || game.attrOpen) return;
   const p = game.player;
   if(n===1) tryRageBolt(p);
   if(n===2) tryFirebolt(p);
@@ -986,9 +1114,9 @@ function useSkill(n){
 // ============================================================================
 function hitMonster(m, dmg, fromx, fromy, knock, col, element){
   m.hp -= dmg;
-  if(chance(0.28)) audio.sfxPlay('hit');
+  audio.hitPlay(element||'hit');
   m.flinch = 0.14; m.hurt = 0.12;
-  game.hitStop = Math.max(game.hitStop, m.boss ? 0.052 : 0.032);
+  game.hitStop = Math.max(game.hitStop, m.boss ? 0.052 : m.elite ? 0.038 : 0.032);
   const eCol = col || dmgElementCol(element);
   addFloat(m.x, m.y-m.r-6, dmg, eCol, {dmg:true, drift:(Math.random()-0.5)*22});
   spatter(m.x, m.y, eCol, 8);
@@ -1022,6 +1150,7 @@ function finalizeMonsterDeath(m){
   }
   game.fx.push({kind:'corpse', type:m.type, x:m.x, y:m.y, r:m.r, rot:rand(0,6.28), life:18, t:0, col:m.col});
   game.fx.push({kind:'decal', sub:'blood', x:m.x, y:m.y, r:m.r+rand(12,24), rot:rand(0,6.28), life:18, t:0, col:'rgba(90,8,8,0.30)'});
+  if(m.elite) eliteMoltenDeath(m);
   game.shake = Math.max(game.shake, 3);
   // xp
   const p = game.player;
@@ -1049,12 +1178,18 @@ function finalizeMonsterDeath(m){
     saveCurrent();
   }
   // loot
-  const dropChance = m.type==='brute' ? 0.9 : 0.32;
+  const dropChance = m.elite ? 0.78 : (m.type==='brute' ? 0.9 : 0.32);
   if(chance(dropChance)){
-    const it = rollItem(game.depth);
+    const it = m.elite ? rollEliteLoot(game.depth) : rollItem(game.depth);
     game.loot.push({ x:m.x+rand(-8,8), y:m.y+rand(-8,8), it, bob:rand(0,6.28) });
   }
-  if(chance(0.20)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28) });
+  if(m.elite){
+    const bonus=rollEliteLoot(game.depth);
+    game.loot.push({ x:m.x+rand(-14,14), y:m.y+rand(-10,10), it:bonus, bob:rand(0,6.28) });
+    if(chance(0.38)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28) });
+    addFloat(m.x,m.y-m.r-22,'ELITE LOOT','#d9b45a');
+  }
+  if(chance(m.elite?0.32:0.20)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28) });
   if(chance(0.035)) game.loot.push({ x:m.x+rand(-10,10), y:m.y+rand(-10,10), orb:chance(0.5)?'fullLife':'fullMana', bob:rand(0,6.28) });
 }
 function killMonster(m){ if(!m.dead && !m.dying) beginMonsterDeath(m); else if(m.dying) finalizeMonsterDeath(m); }
@@ -1071,6 +1206,7 @@ function levelUp(p){
   saveCurrent();
 }
 function damagePlayer(p, dmg){
+  if(p.dying || p.dead) return;
   if(p.dodge>0) return;              // i-frames
   if(p.ward>0) dmg = Math.ceil(dmg*clamp(0.45-talentRank(p,'ward')*0.06-stat(p,'wardBlock')*0.004,0.18,0.45));
   p.life -= dmg;
@@ -1080,11 +1216,77 @@ function damagePlayer(p, dmg){
   spatter(p.x,p.y,'#c02020',8);
   addRing(p.x, p.y, p.r+12, p.ward>0?'#ff6060':'#c02020', 0.28);
   game.fx.push({kind:'decal', sub:'blood', x:p.x+rand(-6,6), y:p.y+rand(-6,6), r:rand(10,18), rot:rand(0,6.28), life:9, t:0, col:'rgba(120,12,12,0.24)'});
-  if(p.life<=0 && !p.dead){ p.dead=true; onDeath(); }
+  if(p.life<=0 && !p.dead && !p.dying) beginPlayerDeath(p);
+}
+function footSurfaceAt(x,y){
+  const d=game.dungeon;
+  if(!d) return 'dungeon';
+  if(game.scene==='forest'||game.scene==='camp'){
+    if(d.path && d.path.some(pt=>dist(x,y,pt.x,pt.y)<pt.r*0.68)) return 'dirt';
+    return 'grass';
+  }
+  const tx=Math.floor(x/TILE), ty=Math.floor(y/TILE);
+  if(tx<0||ty<0||tx>=d.W||ty>=d.H) return 'dungeon';
+  if(d.grid[ty*d.W+tx]===1) return 'stone';
+  return 'dungeon';
+}
+function beginPlayerDeath(p){
+  if(p.dying) return;
+  p.dying=true; p.deathT=0; p.deathFrame=0; p.deathDur=0.54; p.life=0;
+  p.moveTx=null; p.moveTy=null; p.dodge=0; p.castFlash=0;
+  input.left=false; input.right=false;
+  game.deathFade=0; game.deathFadeIn=false; game.deathLossDone=false;
+  game.deathLoc={x:p.x,y:p.y};
+  audio.sfxPlay('death');
+  game.shake=Math.max(game.shake,14);
+  spatter(p.x,p.y,'#601010',14);
+}
+function applyDeathInventoryLoss(p){
+  const forest=game.scene==='forest'||game.scene==='camp';
+  const bag=p.bag;
+  if(!bag.length) return;
+  const pct=forest?rand(0.10,0.18):rand(0.25,0.40);
+  const loseCount=Math.max(forest?0:1, Math.floor(bag.length*pct));
+  for(let i=0;i<loseCount && bag.length;i++){
+    bag.splice(randi(0,bag.length-1),1);
+  }
+  if(loseCount>0) addFloat(game.deathLoc.x,game.deathLoc.y-28,loseCount+' item'+(loseCount>1?'s':'')+' lost from pack','#c07070');
+}
+function respawnAtGraveyard(p){
+  const d=game.dungeon;
+  const gy=d.graveyard||{x:(d.rooms[0].cx+0.5)*TILE,y:(d.rooms[0].cy+0.5)*TILE};
+  p.x=gy.x; p.y=gy.y;
+  p.life=Math.ceil(p.maxLife*0.55); p.mana=Math.ceil(p.maxMana*0.45); p.stamina=p.maxStamina;
+  p.dying=false; p.dead=false; p.deathT=0; p.deathFrame=0; p.hurt=0;
+  p.moveTx=null; p.moveTy=null;
+  game.deathFadeIn=true;
+  addToast('You awaken at the graveyard...','#a9a087',3.4);
+  if(game.scene==='dungeon') addFloat(p.x,p.y-42,'GRAVEYARD OF ECHOES','#8a8490');
+  saveCurrent();
+}
+function updatePlayerDeath(dt){
+  const p=game.player;
+  if(!p.dying) return;
+  p.deathT+=dt;
+  p.deathFrame=Math.min(2,Math.floor(p.deathT/(p.deathDur/3)));
+  if(p.deathT>=p.deathDur && !game.deathLossDone){
+    game.deathLossDone=true;
+    applyDeathInventoryLoss(p);
+  }
+  if(p.deathT>=p.deathDur){
+    game.deathFade=(game.deathFade||0)+dt;
+    if(game.deathFade>=0.55 && !game.deathFadeIn){
+      respawnAtGraveyard(p);
+    }
+  }
+  if(game.deathFadeIn){
+    game.deathFade=(game.deathFade||0)+dt;
+    if(game.deathFade>=0.9){ game.deathFade=0; game.deathFadeIn=false; game.deathLossDone=false; }
+  }
 }
 function usePotion(type){
   const p=game.player;
-  if(!p || p.dead || game.invOpen || game.talentOpen || game.attrOpen) return;
+  if(!p || p.dead || p.dying || game.invOpen || game.talentOpen || game.attrOpen) return;
   if(type==='life'){
     if(p.potions.life<=0 || p.life>=p.maxLife){ audio.sfxPlay('error'); addFloat(p.x,p.y-28,'No health potion','#c07070'); return; }
     p.potions.life--;
@@ -1158,12 +1360,19 @@ function monsterRangedHit(m,p,col,txt){
   addRing(p.x,p.y,p.r+16,col,0.22);
   monsterSpark(p.x,p.y,col,9);
   if(txt) addFloat(m.x,m.y-m.r-8,txt,col);
-  damagePlayer(p,m.dmg);
+  const dmg=Math.ceil(m.dmg);
+  damagePlayer(p,dmg);
+  eliteOnPlayerHit(m,p,dmg,false);
+}
+function monsterMeleeHit(m,p,mult=1){
+  const dmg=Math.ceil(m.dmg*mult);
+  damagePlayer(p,dmg);
+  eliteOnPlayerHit(m,p,dmg,true);
 }
 function monsterSlam(m,p,radius,mult=1){
   game.fx.push({kind:'shockwave',x:m.x,y:m.y,r:8,max:radius,life:0.42,t:0,col:m.boss?'#d6b26a':'#c9aa78'});
   game.shake=Math.max(game.shake,m.boss?13:7);
-  if(dist(m.x,m.y,p.x,p.y)<radius+p.r) damagePlayer(p,Math.ceil(m.dmg*mult));
+  if(dist(m.x,m.y,p.x,p.y)<radius+p.r) monsterMeleeHit(m,p,mult);
 }
 function summonWardenAdds(m){
   const livingAdds=game.monsters.filter(x=>!x.dead && !x.boss && dist(x.x,x.y,m.x,m.y)<320).length;
@@ -1194,13 +1403,14 @@ function updateBoss(m,p,d,dt,dd,windDone){
     addFloat(m.x,m.y-70,newPhase===2?'THE WARDEN RAGES':'THE CRYPT OPENS','#d9b45a');
     addRing(m.x,m.y,m.r+58,'#d6b26a',0.55);
     game.shake=Math.max(game.shake,12);
+    audio.sfxPlay('bossPhase');
     if(newPhase===3) summonWardenAdds(m);
   }
   if(m.charge>0){
     m.charge-=dt;
     moveMonster(m,d,Math.atan2(m.chargeDy,m.chargeDx),m.phase===3?440:360,dt);
     game.fx.push({kind:'spark',x:m.x+rand(-10,10),y:m.y+rand(-8,8),dx:rand(-0.5,0.5),dy:rand(-0.5,0.5),speed:rand(30,80),life:0.24,t:0,col:'#d6b26a'});
-    if(dist(m.x,m.y,p.x,p.y)<m.r+p.r+4) damagePlayer(p,Math.ceil(m.dmg*1.25));
+    if(dist(m.x,m.y,p.x,p.y)<m.r+p.r+4) monsterMeleeHit(m,p,1.25);
     return;
   }
   const a=Math.atan2(p.y-m.y,p.x-m.x), sp=m.speed*(m.phase===3?1.18:1)*(m.slow>0?0.45:1);
@@ -1232,32 +1442,38 @@ function updateMonsterAI(m,p,d,dt){
   if(dd>8) setFacing(m, Math.atan2(p.y-m.y, p.x-m.x));
   if(m.boss){ updateBoss(m,p,d,dt,dd,windDone); return; }
   if(m.flinch>0) return;
-  const a=Math.atan2(p.y-m.y,p.x-m.x), sp=m.speed*(m.slow>0?0.45:1);
+  const a=Math.atan2(p.y-m.y,p.x-m.x);
+  const eliteSpd=(m.eliteSpeedMul||1);
+  const windMul=(m.eliteWindMul||1);
+  const ox=m.x, oy=m.y;
+  let sp=m.speed*eliteSpd*(m.slow>0?0.45:1);
   if(m.type==='skeleton'){
     if(dd<120) moveMonster(m,d,a+Math.PI,sp*0.9,dt);
     else if(dd>m.range) moveMonster(m,d,a,sp*0.72,dt);
-    if(dd<260 && m.atk<=0 && m.wind<=0){ m.wind=0.28; m.special='arrow'; }
+    if(dd<260 && m.atk<=0 && m.wind<=0){ m.wind=0.28*windMul; m.special='arrow'; }
   } else if(m.type==='demon'){
     if(dd<115) moveMonster(m,d,a+Math.PI,sp,dt);
     else if(dd>m.range) moveMonster(m,d,a,sp*0.9,dt);
     else moveMonster(m,d,a+Math.PI/2*Math.sign(Math.sin(game.t+m.x)),sp*0.45,dt);
-    if(dd<235 && m.atk<=0 && m.wind<=0){ m.wind=0.26; m.special='ember'; }
+    if(dd<235 && m.atk<=0 && m.wind<=0){ m.wind=0.26*windMul; m.special='ember'; }
   } else if(m.type==='brute'){
     if(m.charge>0){
       m.charge-=dt; moveMonster(m,d,Math.atan2(m.chargeDy,m.chargeDx),300,dt);
-      if(dist(m.x,m.y,p.x,p.y)<m.r+p.r+2) damagePlayer(p,Math.ceil(m.dmg*1.15));
+      if(dist(m.x,m.y,p.x,p.y)<m.r+p.r+2) monsterMeleeHit(m,p,1.15);
+      eliteMoltenTrail(m,dt,m.x!==ox||m.y!==oy);
       return;
     }
     if(dd>m.range) moveMonster(m,d,a,sp,dt);
     if(m.atk<=0 && m.wind<=0){
-      if(dd>80 && dd<220){ m.wind=0.30; m.special='charge'; }
-      else if(dd<m.range+10){ m.wind=0.30; m.special='slam'; }
+      if(dd>80 && dd<220){ m.wind=0.30*windMul; m.special='charge'; }
+      else if(dd<m.range+10){ m.wind=0.30*windMul; m.special='slam'; }
     }
   } else {
     const frenzy=dd<110?1.22:1;
     if(dd>m.range) moveMonster(m,d,a,sp*frenzy,dt);
-    if(dd<m.range+8 && m.atk<=0 && m.wind<=0){ m.wind=0.18; m.special='bite'; }
+    if(dd<m.range+8 && m.atk<=0 && m.wind<=0){ m.wind=0.18*windMul; m.special='bite'; }
   }
+  eliteMoltenTrail(m,dt,m.x!==ox||m.y!==oy);
   if(windDone){
     if(m.special==='arrow' && dd<280) monsterRangedHit(m,p,'#d8d0b8','BONE SHOT');
     else if(m.special==='ember' && dd<250) monsterRangedHit(m,p,'#ff6a32','EMBER');
@@ -1265,7 +1481,7 @@ function updateMonsterAI(m,p,d,dt){
       m.charge=0.36; m.chargeDx=Math.cos(a); m.chargeDy=Math.sin(a);
       addFloat(m.x,m.y-m.r-6,'CHARGE','#c9aa78');
     } else if(m.special==='slam') monsterSlam(m,p,64,1.08);
-    else if(dd<m.range+10) damagePlayer(p,m.dmg);
+    else if(dd<m.range+10) monsterMeleeHit(m,p,1);
     m.atk=m.atkCd;
     m.special=null;
   }
@@ -1294,11 +1510,21 @@ function update(dt){
   p.castFlash = Math.max(0,p.castFlash-dt);
   p.dodgeCd = Math.max(0,p.dodgeCd-dt);
   p.hurt    = Math.max(0,p.hurt-dt);
+  p.slow    = Math.max(0,(p.slow||0)-dt);
+  if(p.poison>0){
+    p.poison-=dt;
+    p.life -= (p.poisonDps||0)*dt;
+    if(Math.floor(game.t*3)!==Math.floor((game.t-dt)*3)) addFloat(p.x,p.y-24,'Poison','#6ac838',{life:0.55});
+    if(p.life<=0 && !p.dead && !p.dying) beginPlayerDeath(p);
+  }
   p.equipFlash = Math.max(0,(p.equipFlash||0)-dt);
-  const moving = p.moveTx!=null || p.dodge>0;
+  updatePlayerDeath(dt);
+  const playerActive = !p.dead && !p.dying;
+  const moving = playerActive && (p.moveTx!=null || p.dodge>0);
   p.animPhase = (p.animPhase||0) + dt * (moving ? 11 : 2.8);
-  updateEntityAnim(p, dt, moving||p.dodge>0, p.castFlash>0, p.hurt>0);
-  if(!p.dead){
+  if(playerActive) updateEntityAnim(p, dt, moving||p.dodge>0, p.castFlash>0, p.hurt>0);
+  else if(p.dying) updateEntityAnim(p, dt, false, false, false);
+  if(playerActive){
     p.life = Math.min(p.maxLife, p.life + p.lregen*dt);
     p.mana = Math.min(p.maxMana, p.mana + p.mregen*dt);
     const sregen = inCombatFeel(p) ? p.sregenCombat : p.sregenPeace;
@@ -1306,6 +1532,8 @@ function update(dt){
   }
 
   if(p.dead){ return; }
+
+  if(!p.dying){
   if(game.attrOpen){ return; }
 
   // ---- input → action ----
@@ -1334,10 +1562,13 @@ function update(dt){
     if(dd>4){
       p.dir = Math.atan2(dy,dx);
       setFacing(p, p.dir);
-      const step = Math.min(dd, p.speed*dt);
+      const slowMul = p.slow>0 ? 0.58 : 1;
+      const step = Math.min(dd, p.speed*slowMul*dt);
       const nx = p.x + Math.cos(p.dir)*step, ny = p.y + Math.sin(p.dir)*step;
       if(walkable(d,nx,p.y,p.r)) p.x=nx; else p.moveTx=p.x;
       if(walkable(d,p.x,ny,p.r)) p.y=ny; else p.moveTy=p.y;
+      p.footT=(p.footT||0)-dt;
+      if(p.footT<=0){ audio.footstepPlay(footSurfaceAt(p.x,p.y)); p.footT=0.30; }
     } else { p.moveTx=null; }
   }
   // trail fade
@@ -1356,6 +1587,7 @@ function update(dt){
     enterCrypt();
     return;
   }
+  } // end !p.dying player input
 
   // ---- projectiles ----
   for(const pr of game.projectiles){
@@ -1442,6 +1674,7 @@ function descend(){ game.depth++; buildFloor();
   addFloat(game.player.x,game.player.y-30,'DEPTH '+game.depth,'#b06aff'); saveCurrent(); }
 
 function doDodge(p){
+  if(p.dying || p.dead) return;
   if(p.dodgeCd>0 || p.dodge>0) return;
   if(p.stamina<DODGE_STAMINA){ audio.sfxPlay('error'); addFloat(p.x,p.y-28,'Need stamina','#c8d8ff'); return; }
   const a = Math.atan2(input.wy-p.y, input.wx-p.x);
@@ -1664,12 +1897,27 @@ function drawGothicProp(kind,x,y,seed=0){
     ctx.fillStyle='rgba(80,110,140,0.28)'; ctx.beginPath(); ctx.ellipse(0,3,24,8,0,0,6.28); ctx.fill();
     ctx.fillStyle='#3c3f48'; ctx.fillRect(-6,-24,12,28);
     ctx.fillStyle='rgba(120,170,210,0.35)'; ctx.fillRect(-2,-18,4,22);
+  } else if(kind==='graveyard'){
+    ctx.fillStyle='rgba(0,0,0,0.48)'; ctx.beginPath(); ctx.ellipse(0,18,52,16,0,0,6.28); ctx.fill();
+    ctx.strokeStyle='rgba(90,95,110,0.72)'; ctx.lineWidth=2;
+    ctx.strokeRect(-38,-8,76,28); ctx.strokeRect(-38,-22,76,14);
+    for(const gx of [-24,-8,8,24]){
+      ctx.fillStyle='#2a2b32'; ctx.fillRect(gx-7,-28,14,36);
+      ctx.beginPath(); ctx.arc(gx,-28,7,Math.PI,0); ctx.fill();
+      ctx.strokeStyle='rgba(217,180,90,0.14)'; ctx.strokeRect(gx-5,-18,10,10);
+    }
+    ctx.fillStyle='rgba(180,190,210,'+(0.08+Math.sin(game.t*1.6+seed)*0.04)+')';
+    for(let i=0;i<5;i++){
+      const mx=(hash2(seed,i,1)-0.5)*70, my=-8-hash2(seed,i,2)*18;
+      ctx.beginPath(); ctx.ellipse(mx,my,16+hash2(seed,i,3)*12,8,0,0,6.28); ctx.fill();
+    }
   }
   ctx.restore();
 }
 
 function drawLandmark(lm){
-  drawLight(lm.x,lm.y,90,lm.kind==='bloodAltar'?'rgba(255,40,30,ALPHA)':lm.kind==='reliquary'?'rgba(217,180,90,ALPHA)':'rgba(100,130,170,ALPHA)',0.12);
+  const lightCol=lm.kind==='bloodAltar'?'rgba(255,40,30,ALPHA)':lm.kind==='reliquary'?'rgba(217,180,90,ALPHA)':lm.kind==='graveyard'?'rgba(140,150,180,ALPHA)':'rgba(100,130,170,ALPHA)';
+  drawLight(lm.x,lm.y,90,lightCol,lm.kind==='graveyard'?0.10:0.12);
   drawGothicProp(lm.kind,lm.x,lm.y,lm.x+lm.y+game.depth);
   ctx.save();
   ctx.textAlign='center';
@@ -1857,6 +2105,12 @@ function drawCampProps(d){
   ctx.fillStyle='#d9b45a'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
   ctx.fillText('STASH', s.x, s.y-18);
   for(const prop of d.props) drawGothicProp(prop.kind, prop.x, prop.y, prop.x+prop.y);
+  if(d.graveyard){
+    drawLight(d.graveyard.x,d.graveyard.y,88,'rgba(140,150,180,ALPHA)',0.10);
+    drawGothicProp('graveyard', d.graveyard.x, d.graveyard.y, d.graveyard.x+d.graveyard.y);
+    ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
+    ctx.fillText('CAMP GRAVEYARD', d.graveyard.x, d.graveyard.y-52);
+  }
   drawLight(f.x,f.y,110,'rgba(255,140,40,ALPHA)',0.22);
 }
 
@@ -2166,6 +2420,11 @@ function drawPlayerWeaponOffhand(p, cast, trim, pose){
 function drawPlayerSprite(p){
   ctx.save();
   ctx.translate(p.x,p.y);
+  if(p.dying){
+    drawPlayerDeathSprite(p);
+    ctx.restore();
+    return;
+  }
   const moving = p.moveTx!=null || p.dodge>0;
   const pose = playerAnimPose(p, moving);
   const bob = pose.state==='walk' ? pose.step*2.5 : (pose.state==='idle' ? pose.step*0.8 : 0);
@@ -2209,6 +2468,50 @@ function drawPlayerSprite(p){
     }
     ctx.restore();
   }
+  ctx.restore();
+}
+
+function drawPlayerDeathSprite(p){
+  const df=p.deathFrame||0;
+  const robe=playerRobeFill(p);
+  const trim=gearTrim(p.gear.armor)||gearTrim(p.gear.helm);
+  const a=Math.max(0.35,1-p.deathT/p.deathDur);
+  ctx.globalAlpha=a;
+  procShadow(2,p.r*0.84,p.r*1.15,p.r*0.42);
+  if(df===0){
+    ctx.scale(1.12,0.86);
+    ctx.fillStyle=robe;
+    ctx.beginPath(); ctx.moveTo(-14,14); ctx.lineTo(-10,-10); ctx.lineTo(10,-10); ctx.lineTo(14,14); ctx.closePath(); ctx.fill();
+    drawPlayerHead(p, trim);
+    drawPlayerWeaponOffhand(p, 0, trim, {cast:0,castAbility:'rage'});
+  } else if(df===1){
+    ctx.rotate(0.28);
+    ctx.translate(4,6);
+    ctx.fillStyle=robe;
+    ctx.beginPath(); ctx.moveTo(-16,16); ctx.quadraticCurveTo(-8,-6,8,-4); ctx.lineTo(14,16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#21172c'; ctx.beginPath(); ctx.arc(2,-6,8,0,6.28); ctx.fill();
+    ctx.strokeStyle='#8b6a36'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(8,0); ctx.lineTo(22,-8); ctx.stroke();
+  } else {
+    ctx.rotate(1.12);
+    ctx.translate(0,12);
+    ctx.fillStyle=robe;
+    ctx.beginPath(); ctx.ellipse(0,0,16,10,0.2,0,6.28); ctx.fill();
+    ctx.fillStyle='#21172c'; ctx.beginPath(); ctx.arc(-10,-2,7,0,6.28); ctx.fill();
+    ctx.fillStyle='rgba(120,12,12,0.35)'; ctx.beginPath(); ctx.ellipse(4,4,8,4,0,0,6.28); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawInventoryPaperDoll(p, cx, cy){
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0,52,38,12,0,0,6.28); ctx.fill();
+  ctx.scale(1.75,1.75);
+  const pose={state:'idle',step:0,frame:0,cast:0,castAbility:'rage',hit:false,dodge:false};
+  const robe=playerRobeFill(p);
+  const trim=gearTrim(p.gear.armor)||gearTrim(p.gear.helm);
+  procShadow(2,18,22,8);
+  drawPlayerFigureSouth(p, pose, robe, trim);
   ctx.restore();
 }
 
@@ -2339,6 +2642,32 @@ function drawMonsterTypeBody(m,col,facing,leg,pulse){
   else if(t==='brute') drawMonBrute(facing,m,col,leg,pulse);
   else drawMonZombie(facing,m,col,leg,pulse);
 }
+function drawMonsterDeathPose(m,df,col,facing,leg,pulse){
+  const t=m.type;
+  if(t==='skeleton'){
+    ctx.rotate(df*0.22);
+    ctx.translate(0,df*7);
+    ctx.globalAlpha*=1-df*0.22;
+    if(df>=1){ ctx.strokeStyle=col; ctx.lineWidth=2;
+      for(let i=0;i<5;i++){ const a=i/5*6.28+df; ctx.beginPath(); ctx.moveTo(Math.cos(a)*4,Math.sin(a)*4); ctx.lineTo(Math.cos(a)*m.r,Math.sin(a)*m.r+df*6); ctx.stroke(); }
+    }
+    drawMonSkeleton(facing,m,col,leg,pulse);
+  } else if(t==='demon'){
+    ctx.scale(1+df*0.12,1-df*0.28);
+    ctx.translate(0,-df*6);
+    if(df>=1){ ctx.fillStyle='rgba(255,90,32,'+(0.35-df*0.1)+')'; ctx.beginPath(); ctx.arc(0,0,m.r+df*8,0,6.28); ctx.fill(); }
+    drawMonDemon(facing,m,col,leg,pulse);
+  } else if(t==='brute'){
+    ctx.rotate((df+0.5)*0.55);
+    ctx.translate(df*10,df*8);
+    drawMonBrute(facing,m,col,leg,pulse);
+  } else {
+    ctx.rotate(df*0.35);
+    ctx.scale(1,1-df*0.32);
+    ctx.translate(0,df*10);
+    drawMonZombie(facing,m,col,leg,pulse);
+  }
+}
 function drawRangedWindup(m){
   if(m.wind<=0||!m.special) return;
   const p0=game.player, maxW=m.boss?0.42:(m.special==='arrow'?0.28:0.26);
@@ -2369,10 +2698,16 @@ function drawMonsterSprite(m){
   const stagger = pulse * (m.flinch>0?0.5:1);
   if(m.dying){
     const df=m.deathFrame||0;
-    ctx.globalAlpha=Math.max(0.35,1-m.deathT/m.deathDur);
-    ctx.translate(0,df*4);
-    ctx.scale(1,1-df*0.14);
-    ctx.rotate(df*0.08);
+    ctx.globalAlpha=Math.max(0.25,1-m.deathT/m.deathDur);
+    procShadow(0,m.r*0.75,m.r*1.05,m.r*0.4);
+    let col = m.hurt>0 ? '#ffffff' : (m.slow>0?'#9fd0ff':m.col);
+    if(m.tutorial && !m.hurt) col='#8cb878';
+    ctx.save();
+    if(facing===2) ctx.scale(-1,1);
+    drawMonsterDeathPose(m,df,col,facing,leg,pulse);
+    ctx.restore();
+    ctx.restore();
+    return;
   } else if(m.hurt>0) ctx.scale(1.18,0.82);
   else ctx.translate(0,stagger*1.8);
   procShadow(0,m.r*0.75,m.r*1.05,m.r*0.4);
@@ -2493,10 +2828,29 @@ function drawMonsterEntity(m,p){
     ctx.restore();
   }
   drawMonsterSprite(m);
-  if(!m.dying && m.hp<m.maxhp){ const bw=m.r*2, hp=m.hp/m.maxhp;
-    ctx.fillStyle='#000'; ctx.fillRect(m.x-bw/2,m.y-m.r-9,bw,4);
+  if(!m.dying && m.hp<m.maxhp){
+    const bw=m.r*2.2, hp=m.hp/m.maxhp, barY=m.y-m.r-(m.elite?14:9), barH=m.elite?6:4;
+    if(m.elite){
+      ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(m.x-bw/2-1,barY-1,bw+2,barH+2);
+      ctx.strokeStyle=m.auraCol||elitePrimaryCol(m); ctx.lineWidth=1;
+      ctx.strokeRect(m.x-bw/2-1,barY-1,bw+2,barH+2);
+    } else {
+      ctx.fillStyle='#000'; ctx.fillRect(m.x-bw/2,barY,bw,barH);
+    }
     ctx.fillStyle=hp>0.5?'#7ac83a':hp>0.25?'#e0b030':'#c03030';
-    ctx.fillRect(m.x-bw/2,m.y-m.r-9,bw*hp,4); }
+    ctx.fillRect(m.x-bw/2,barY,bw*hp,barH);
+  }
+  const hovered=dist(input.wx,input.wy,m.x,m.y)<m.r+10;
+  if(m.elite || hovered){
+    const label=m.elite?m.name:(m.name||MTYPES[m.type]?.name||'');
+    ctx.font=(m.elite?'bold 10px':'10px')+' Trebuchet MS';
+    ctx.textAlign='center';
+    const tw=ctx.measureText(label).width+12;
+    const ly=m.y-m.r-(m.elite?26:18);
+    ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(m.x-tw/2,ly-10,tw,12);
+    ctx.fillStyle=m.elite?(m.auraCol||'#d9b45a'):'#d8d4c4';
+    ctx.fillText(label,m.x,ly);
+  }
 }
 function drawSortedWorldEntities(p){
   const layers=[];
@@ -2747,6 +3101,10 @@ function render(){
   if(game.invOpen) drawInventory();
   if(game.talentOpen) drawTalentTree();
   if(game.attrOpen) drawAttributeScreen();
+  if((game.deathFade||0)>0){
+    let a=game.deathFadeIn ? Math.max(0,1-(game.deathFade-0.55)/0.35) : Math.min(1,game.deathFade/0.55);
+    if(a>0.02){ ctx.fillStyle='rgba(5,3,10,'+(a*0.92)+')'; ctx.fillRect(0,0,VIEW_W,VIEW_H); }
+  }
 }
 
 // ============================================================================
@@ -3032,9 +3390,13 @@ function drawInventory(){
   const detailX=x+610, detailY=topY, detailW=W-634, detailH=H-92;
 
   drawPanelTitle(leftX, topY-18, 'Equipped Relics');
+  ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fillRect(leftX,topY, equipW, 118);
+  ctx.strokeStyle='rgba(217,180,90,0.18)'; ctx.strokeRect(leftX+0.5,topY+0.5,equipW-1,117);
+  drawInventoryPaperDoll(p, leftX+equipW/2, topY+58);
+  const slotTop=topY+128;
   for(let si=0;si<SLOTS.length;si++){
     const s=SLOTS[si], col=si%2, row=Math.floor(si/2);
-    const ex=leftX+col*(equipW/2+8), ey=topY+row*58;
+    const ex=leftX+col*(equipW/2+8), ey=slotTop+row*58;
     const it=p.gear[s];
     drawItemCard(ex,ey,equipW/2,48,it,{slot:s,equipped:true,selected:selected&&selected.item===it});
     invHit.push({x:ex,y:ey,w:equipW/2,h:48,type:'slot',slot:s,item:it});
@@ -3445,21 +3807,8 @@ function handleAttributeClick(mx,my){
 }
 
 // ============================================================================
-//  DEATH / LOOP
+//  DEATH / LOOP — graveyard respawn (no run summary screen)
 // ============================================================================
-function onDeath(){
-  running=false;
-  saveCurrent();
-  audio.sfxPlay('death');
-  audio.setMusic('select');
-  const ov=document.getElementById('overlay');
-  ov.className='dead'; ov.style.display='flex';
-  ov.innerHTML = '<h1>YOU DIED</h1>'+
-    '<p>The crypt claims another. You reached <b style="color:#b06aff">Depth '+game.depth+
-    '</b> at <b style="color:#d9b45a">Level '+game.player.level+'</b>.</p>'+
-    '<button id="startBtn">Character Select</button>';
-  document.getElementById('startBtn').onclick=showCharacterSelect;
-}
 function loop(){
   if(!running) return;
   const t=now(); let dt=t-lastT; lastT=t;
