@@ -3650,7 +3650,7 @@ function drawPotionRack(x,y,type,count,max,key){
     }
   }
   if(mobileMode){
-    mobileHit.push({x:x-6,y:y-10,w:max*26+12,h:40,type:type==='life'?'potion-life':'potion-mana'});
+    mobileHit.push({x:x-8,y:y-12,w:max*26+16,h:48,type:type==='life'?'potion-life':'potion-mana'});
   }
 }
 let hudHit=[];
@@ -3729,7 +3729,7 @@ function drawForestTutorialPanel(){
     ctx.fillStyle='#d9b45a'; ctx.font='bold 14px Trebuchet MS'; ctx.textAlign='left';
     ctx.fillText('GRIMHOLLOW WOOD',x+16,y+24);
     ctx.fillStyle='#b8b09a'; ctx.font='12px Trebuchet MS';
-    ctx.fillText('Left-click to move. Follow the path east — no foes here yet.',x+16,y+46);
+    ctx.fillText(mobileMode?'Tap ground to move. Follow the path east.':'Left-click to move. Follow the path east — no foes here yet.',x+16,y+46);
     ctx.restore();
     return;
   }
@@ -3742,10 +3742,12 @@ function drawForestTutorialPanel(){
   ctx.fillStyle='#d9b45a'; ctx.font='bold 14px Trebuchet MS'; ctx.textAlign='left';
   ctx.fillText(sceneIsForestStage(3)?'CRYPT APPROACH':'DEEP WOODS',x+16,y+24);
   ctx.fillStyle='#b8b09a'; ctx.font='12px Trebuchet MS';
-  const line1=left>0 ? '1. Left-click ground to move. Hold on a Lost Dead to cast Smite.' : '1. The path is clear. Walk to the Crypt Gate.';
+  const line1=left>0
+    ? (mobileMode?'1. Joystick to move. Hold Smite on Lost Dead.':'1. Left-click ground to move. Hold on a Lost Dead to cast Smite.')
+    : '1. The path is clear. Walk to the Crypt Gate.';
   const line2=p.potions.life<p.potions.maxLife || p.potions.mana<p.potions.maxMana
-    ? '2. Pick up red/blue refills, then use Q for health or E for mana.'
-    : '2. Potions are full. Q drinks health, E drinks mana.';
+    ? (mobileMode?'2. Tap potion flasks when you pick up refills.':'2. Pick up red/blue refills, then use Q for health or E for mana.')
+    : (mobileMode?'2. Tap HP/MP flasks to drink potions.':'2. Potions are full. Q drinks health, E drinks mana.');
   ctx.fillText(line1,x+16,y+48);
   ctx.fillText(line2,x+16,y+66);
   ctx.fillStyle=left>0?'#ffb050':'#7ac83a'; ctx.font='bold 12px Trebuchet MS'; ctx.textAlign='right';
@@ -3754,25 +3756,28 @@ function drawForestTutorialPanel(){
 }
 function drawHUD(){
   const p=game.player;
-  const rad=46, y=VIEW_H-rad-24;
+  const portrait=mobileMode && VIEW_H>VIEW_W;
+  const rad=mobileMode?(portrait?34:40):46, y=VIEW_H-rad-(mobileMode?16:24);
+  const railH=mobileMode?(portrait?108:118):132;
   const rail=ctx.createLinearGradient(0,VIEW_H-120,0,VIEW_H);
   rail.addColorStop(0,'rgba(0,0,0,0)');
   rail.addColorStop(0.45,'rgba(4,5,10,0.62)');
   rail.addColorStop(1,'rgba(0,0,0,0.92)');
-  ctx.fillStyle=rail; ctx.fillRect(0,VIEW_H-132,VIEW_W,132);
+  ctx.fillStyle=rail; ctx.fillRect(0,VIEW_H-railH,VIEW_W,railH);
   ctx.strokeStyle='rgba(217,180,90,0.18)'; ctx.beginPath();
-  ctx.moveTo(VIEW_W*0.28,VIEW_H-98); ctx.lineTo(VIEW_W*0.72,VIEW_H-98); ctx.stroke();
+  ctx.moveTo(VIEW_W*0.28,VIEW_H-(railH-34)); ctx.lineTo(VIEW_W*0.72,VIEW_H-(railH-34)); ctx.stroke();
   orb(rad+24, y, rad, p.life/p.maxLife, '#ff5a5a','#8a1010',
       Math.ceil(p.life)+' / '+p.maxLife);
   orb(VIEW_W-rad-24, y, rad, p.mana/p.maxMana, '#5a9aff','#101a6a',
       Math.ceil(p.mana)+' / '+p.maxMana);
   drawStaminaBar(p, rad, y);
   drawDodgeHint(p);
-  drawPotionRack(rad+92,VIEW_H-64,'life',p.potions.life,p.potions.maxLife,'Q');
-  drawPotionRack(VIEW_W-rad-92-p.potions.maxMana*26,VIEW_H-64,'mana',p.potions.mana,p.potions.maxMana,'E');
+  drawPotionRack(rad+92,VIEW_H-(mobileMode?56:64),'life',p.potions.life,p.potions.maxLife,'Q');
+  drawPotionRack(VIEW_W-rad-92-p.potions.maxMana*26,VIEW_H-(mobileMode?56:64),'mana',p.potions.mana,p.potions.maxMana,'E');
 
   // numbered skill bar (center)
-  const bx=VIEW_W/2, by=VIEW_H-40;
+  const bx=VIEW_W/2, by=VIEW_H-(mobileMode?36:40);
+  const skillSz=mobileMode?58:52, skillPad=mobileMode?30:26;
   const skills = ['rage','firebolt','nova','lightning','flame','ward'].map(id=>{
     const a=ABILITIES[id];
     return {id, key:String(a.slot), label:a.label, name:a.name, locked:!abilityUnlocked(p,id),
@@ -3782,8 +3787,8 @@ function drawHUD(){
   const drawSkill=(x,s)=>{
     if(s.locked){
       ctx.fillStyle='rgba(4,5,9,0.88)';
-      ctx.fillRect(x-28,by-28,56,56);
-      drawGothicFrame(x-28,by-28,56,56,'rgba(80,70,55,0.38)');
+      ctx.fillRect(x-skillPad,by-skillPad,skillSz,skillSz);
+      drawGothicFrame(x-skillPad,by-skillPad,skillSz,skillSz,'rgba(80,70,55,0.38)');
       ctx.fillStyle='#4e4b43'; ctx.font='bold 12px Trebuchet MS'; ctx.textAlign='center';
       ctx.fillText(s.key, x-18, by-12);
       ctx.fillStyle='rgba(255,255,255,0.08)'; ctx.font='9px Trebuchet MS';
@@ -3796,18 +3801,19 @@ function drawHUD(){
     ctx.fillStyle=ready?'rgba(18,16,18,0.92)':'rgba(8,9,14,0.88)';
     ctx.strokeStyle=ready?s.col:'#444';
     ctx.lineWidth=2; ctx.beginPath();
-    ctx.roundRect ? ctx.roundRect(x-26,by-26,52,52,6) : ctx.rect(x-26,by-26,52,52);
+    ctx.roundRect ? ctx.roundRect(x-(skillPad-2),by-(skillPad-2),skillSz-4,skillSz-4,6) : ctx.rect(x-(skillPad-2),by-(skillPad-2),skillSz-4,skillSz-4);
     ctx.fill(); ctx.stroke(); ctx.shadowBlur=0;
     drawSkillGlyph(x, by-2, s.id, ready?s.col:'#555');
-    ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(x-22,by-22,44,11);
+    ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(x-(skillPad-6),by-(skillPad-6),skillSz-12,11);
     if(s.cd>0){ ctx.fillStyle='rgba(0,0,0,0.62)';
-      ctx.fillRect(x-26,by-26,52,52*(s.cd/s.max)); }
-    if(ready){ ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.strokeRect(x-20,by-20,40,40); }
+      ctx.fillRect(x-(skillPad-2),by-(skillPad-2),skillSz-4,skillSz-4*(s.cd/s.max)); }
+    if(ready){ ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.strokeRect(x-(skillPad-4),by-(skillPad-4),skillSz-8,skillSz-8); }
     ctx.fillStyle='#d9b45a'; ctx.font='bold 12px Trebuchet MS'; ctx.fillText(s.key, x-18, by-12);
     ctx.fillStyle='#8a8470'; ctx.font='9px Trebuchet MS'; ctx.fillText(s.name, x, by+19);
-    if(mobileMode && !s.locked) mobileHit.push({x:x-30,y:by-30,w:60,h:60,type:'skill',slot:Number(s.key)});
+    if(mobileMode && !s.locked) mobileHit.push({x:x-skillPad-4,y:by-skillPad-4,w:skillSz+8,h:skillSz+8,type:'skill',slot:Number(s.key)});
   };
-  for(let i=0;i<skills.length;i++) drawSkill(bx-165+i*66, skills[i]);
+  const skillGap=mobileMode?68:66;
+  for(let i=0;i<skills.length;i++) drawSkill(bx-165+i*skillGap, skills[i]);
   ctx.lineWidth=1;
 
   // xp bar (very bottom)
@@ -3877,7 +3883,7 @@ function drawInventory(){
   ctx.fillStyle='#d9b45a'; ctx.font='bold 22px Trebuchet MS';
   ctx.fillText('INVENTORY', x+22, y+30);
   ctx.fillStyle='#8a8470'; ctx.font='11px Trebuchet MS';
-  ctx.fillText('Click an item to inspect. Use Equip or Drop. Press I to close.', x+170, y+30);
+  ctx.fillText(mobileMode?'Tap items to inspect · tap Equip/Drop · tap outside to close':'Click an item to inspect. Use Equip or Drop. Press I to close.', x+170, y+30);
 
   const leftX=x+24, topY=y+66, equipW=250;
   const bagX=x+296, bagY=topY, bagW=286;
@@ -3897,7 +3903,7 @@ function drawInventory(){
   }
 
   drawPanelTitle(bagX, bagY-18, 'Backpack '+p.bag.length+' / 24');
-  const cols=4, cell=62, gap=8;
+  const cols=4, cell=mobileMode?68:62, gap=8;
   for(let i=0;i<24;i++){
     const col=i%cols, row=Math.floor(i/cols);
     const bx=bagX+col*(cell+gap), by=bagY+row*(cell+gap);
@@ -4106,7 +4112,7 @@ function drawTalentTree(){
   ctx.fillStyle='#d9b45a'; ctx.font='bold 22px Trebuchet MS'; ctx.textAlign='left';
   ctx.fillText('TALENT TREE',x+24,y+32);
   ctx.fillStyle='#8a8470'; ctx.font='11px Trebuchet MS';
-  ctx.fillText('Press T to close. Spend points earned from leveling.',x+182,y+30);
+  ctx.fillText(mobileMode?'Tap talents to inspect · tap Spend · tap outside to close':'Press T to close. Spend points earned from leveling.',x+182,y+30);
   ctx.fillStyle=p.talentPoints>0?'#d9b45a':'#6a6656'; ctx.font='bold 14px Trebuchet MS';
   ctx.fillText('Unspent Points: '+p.talentPoints,x+W-190,y+31);
 
@@ -4147,7 +4153,8 @@ function drawTalentTree(){
     ctx.fillText(rank+'/'+t.max,nx,ny+43);
     ctx.fillStyle=unlocked?'#b8b09a':'#5c5a52'; ctx.font='10px Trebuchet MS';
     ctx.fillText(t.name,nx,ny+57);
-    talentHit.push({x:nx-32,y:ny-32,w:64,h:82,type:'talent',id:t.id});
+    const hitW=mobileMode?72:64, hitH=mobileMode?90:82;
+    talentHit.push({x:nx-hitW/2,y:ny-36,w:hitW,h:hitH,type:'talent',id:t.id});
     ctx.restore();
   }
 
@@ -4315,9 +4322,22 @@ function loop(){
 // ============================================================================
 //  MOBILE CONTROLS
 // ============================================================================
+function safeInset(){
+  const cs=getComputedStyle(document.body);
+  return {
+    top:parseFloat(cs.paddingTop)||0,
+    right:parseFloat(cs.paddingRight)||0,
+    bottom:parseFloat(cs.paddingBottom)||0,
+    left:parseFloat(cs.paddingLeft)||0
+  };
+}
 function canvasPoint(e){
   const r=canvas.getBoundingClientRect();
   const t=e.touches?e.touches[0]:e;
+  return {x:(t.clientX-r.left)*(canvas.width/r.width), y:(t.clientY-r.top)*(canvas.height/r.height)};
+}
+function canvasPointFromTouch(t){
+  const r=canvas.getBoundingClientRect();
   return {x:(t.clientX-r.left)*(canvas.width/r.width), y:(t.clientY-r.top)*(canvas.height/r.height)};
 }
 function nearestEnemy(p,maxDist=300){
@@ -4336,52 +4356,72 @@ function mobileAimPoint(p){
     return {x:p.x+input.joy.dx*220,y:p.y+input.joy.dy*220};
   return {x:input.wx,y:input.wy};
 }
+function interactLabel(p){
+  if(sceneIsTown() && stashNearPlayer(p)) return 'STASH';
+  return 'TALK';
+}
 function mobileLayout(){
-  const pad=14, joyR=52;
+  const sa=safeInset();
+  const portrait=VIEW_H>VIEW_W;
+  const pad=12+Math.max(sa.bottom,sa.left);
+  const joyR=portrait?48:54;
+  const btn=portrait?50:58;
+  const sm=portrait?44:48;
   return {
-    joy:{cx:pad+joyR+8, cy:VIEW_H-pad-joyR-8, r:joyR},
-    attack:{x:VIEW_W-pad-58, y:VIEW_H-pad-58, w:58, h:58},
-    dodge:{x:VIEW_W-pad-128, y:VIEW_H-pad-54, w:48, h:48},
-    interact:{x:VIEW_W-pad-58, y:VIEW_H-pad-128, w:48, h:48},
-    inv:{x:pad+4, y:pad+4, w:44, h:44}
+    joy:{cx:sa.left+pad+joyR, cy:VIEW_H-sa.bottom-pad-joyR, r:joyR},
+    attack:{x:VIEW_W-sa.right-pad-btn, y:VIEW_H-sa.bottom-pad-btn, w:btn, h:btn},
+    dodge:{x:VIEW_W-sa.right-pad-btn-sm-10, y:VIEW_H-sa.bottom-pad-sm, w:sm, h:sm},
+    interact:{x:VIEW_W-sa.right-pad-btn, y:VIEW_H-sa.bottom-pad-btn-sm-14, w:sm, h:sm},
+    inv:{x:sa.left+8, y:sa.top+8, w:44, h:44},
+    talent:{x:sa.left+58, y:sa.top+8, w:44, h:44}
   };
 }
 function drawMobileButton(x,y,w,h,label,col,pressed){
   ctx.save();
-  ctx.fillStyle=pressed?'rgba(18,16,18,0.94)':'rgba(8,9,14,0.78)';
+  ctx.shadowColor=col; ctx.shadowBlur=pressed?14:6;
+  ctx.fillStyle=pressed?'rgba(22,18,14,0.94)':'rgba(8,9,14,0.78)';
   ctx.strokeStyle=col; ctx.lineWidth=2;
-  if(ctx.roundRect) ctx.roundRect(x,y,w,h,8); else ctx.rect(x,y,w,h);
+  if(ctx.roundRect) ctx.roundRect(x,y,w,h,10); else ctx.rect(x,y,w,h);
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle=col; ctx.font='bold '+(w>50?'13':'11')+'px Trebuchet MS'; ctx.textAlign='center';
+  ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fillRect(x+2,y+2,w-4,Math.floor(h*0.35));
+  ctx.fillStyle=col; ctx.font='bold '+(w>52?'13':'10')+'px Trebuchet MS'; ctx.textAlign='center';
   ctx.fillText(label, x+w/2, y+h/2+(w>50?5:4));
   ctx.restore();
 }
 function drawMobileControls(){
-  if(!mobileMode || !game || game.invOpen || game.talentOpen || game.attrOpen || game.stashOpen) return;
+  if(!mobileMode || !game || game.invOpen || game.talentOpen || game.attrOpen || game.stashOpen || game.npcDialog) return;
   const L=mobileLayout(), p=game.player;
   ctx.save();
-  ctx.fillStyle='rgba(4,5,10,0.35)'; ctx.fillRect(0,VIEW_H-170,VIEW_W*0.42,170);
-  ctx.fillStyle='rgba(4,5,10,0.35)'; ctx.fillRect(VIEW_W*0.58,VIEW_H-170,VIEW_W*0.42,170);
+  ctx.fillStyle='rgba(4,5,10,0.42)'; ctx.fillRect(0,VIEW_H-178,VIEW_W*0.44,178);
+  ctx.fillStyle='rgba(4,5,10,0.42)'; ctx.fillRect(VIEW_W*0.56,VIEW_H-178,VIEW_W*0.44,178);
   ctx.strokeStyle='rgba(217,180,90,0.22)'; ctx.lineWidth=2;
   ctx.beginPath(); ctx.arc(L.joy.cx,L.joy.cy,L.joy.r,0,6.28); ctx.stroke();
-  ctx.fillStyle='rgba(217,180,90,0.08)'; ctx.beginPath(); ctx.arc(L.joy.cx,L.joy.cy,L.joy.r-6,0,6.28); ctx.fill();
+  ctx.fillStyle='rgba(217,180,90,0.10)'; ctx.beginPath(); ctx.arc(L.joy.cx,L.joy.cy,L.joy.r-6,0,6.28); ctx.fill();
   if(input.joy.active){
     const kx=L.joy.cx+input.joy.dx*(L.joy.r-10), ky=L.joy.cy+input.joy.dy*(L.joy.r-10);
-    ctx.fillStyle='rgba(217,180,90,0.85)'; ctx.beginPath(); ctx.arc(kx,ky,16,0,6.28); ctx.fill();
+    ctx.fillStyle='rgba(217,180,90,0.88)'; ctx.beginPath(); ctx.arc(kx,ky,18,0,6.28); ctx.fill();
+    ctx.strokeStyle='rgba(255,230,160,0.55)'; ctx.lineWidth=2; ctx.stroke();
   }
   ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
   ctx.fillText('MOVE', L.joy.cx, L.joy.cy+L.joy.r+14);
-  mobileHit.push({x:L.joy.cx-L.joy.r,y:L.joy.cy-L.joy.r,w:L.joy.r*2,h:L.joy.r*2,type:'joy'});
+  mobileHit.push({x:L.joy.cx-L.joy.r-6,y:L.joy.cy-L.joy.r-6,w:(L.joy.r+6)*2,h:(L.joy.r+6)*2,type:'joy'});
   drawMobileButton(L.attack.x,L.attack.y,L.attack.w,L.attack.h,'SMITE','#d9b45a',input.attack);
   mobileHit.push({...L.attack,type:'attack'});
-  drawMobileButton(L.dodge.x,L.dodge.y,L.dodge.w,L.dodge.h,'DODGE','#c8d8ff',false);
+  const dodgeReady=p.dodgeCd<=0 && p.stamina>=DODGE_STAMINA && p.dodge<=0;
+  drawMobileButton(L.dodge.x,L.dodge.y,L.dodge.w,L.dodge.h,'DODGE',dodgeReady?'#c8d8ff':'#6a7088',false);
   mobileHit.push({...L.dodge,type:'dodge'});
   if(canWorldInteract(p)){
-    drawMobileButton(L.interact.x,L.interact.y,L.interact.w,L.interact.h,'TALK','#7ac83a',false);
+    const il=interactLabel(p);
+    drawMobileButton(L.interact.x,L.interact.y,L.interact.w,L.interact.h,il,il==='STASH'?'#d9b45a':'#7ac83a',false);
     mobileHit.push({...L.interact,type:'interact'});
   }
   drawMobileButton(L.inv.x,L.inv.y,L.inv.w,L.inv.h,'INV','#d9b45a',game.invOpen);
   mobileHit.push({...L.inv,type:'inv'});
+  if(p.talentPoints>0){
+    drawMobileButton(L.talent.x,L.talent.y,L.talent.w,L.talent.h,'T','#d9b45a',false);
+    mobileHit.push({...L.talent,type:'talent'});
+  }
   ctx.restore();
 }
 function handleMobileTap(mx,my){
@@ -4401,6 +4441,7 @@ function handleMobileTap(mx,my){
     if(h.type==='potion-life'){ usePotion('life'); return true; }
     if(h.type==='potion-mana'){ usePotion('mana'); return true; }
     if(h.type==='skill'){ useSkill(h.slot); return true; }
+    if(h.type==='talent'){ toggleTalentPanel(true); return true; }
     return true;
   }
   return false;
@@ -4408,7 +4449,7 @@ function handleMobileTap(mx,my){
 function handleJoyTouch(mx,my,tid,start){
   const L=mobileLayout();
   if(start){
-    if(dist(mx,my,L.joy.cx,L.joy.cy)>L.joy.r+8) return false;
+    if(dist(mx,my,L.joy.cx,L.joy.cy)>L.joy.r+12) return false;
     input.joy.active=true; input.joy.tid=tid; input.joy.cx=L.joy.cx; input.joy.cy=L.joy.cy;
   }
   if(!input.joy.active || input.joy.tid!==tid) return false;
@@ -4420,6 +4461,14 @@ function handleJoyTouch(mx,my,tid,start){
 }
 function releaseJoy(tid){
   if(input.joy.tid===tid){ input.joy.active=false; input.joy.dx=0; input.joy.dy=0; input.joy.tid=null; }
+}
+function releaseMobileAttack(tid){
+  if(mobileAttackTid===tid){ input.attack=false; mobileAttackTid=null; }
+}
+function npcDialogHit(mx,my){
+  if(!game?.npcDialog) return false;
+  const x=VIEW_W/2-220, y=VIEW_H-150, w=440, h=92;
+  return mx>=x && mx<=x+w && my>=y && my<=y+h;
 }
 
 // ============================================================================
@@ -4459,34 +4508,43 @@ canvas.addEventListener('touchstart', e=>{
   e.preventDefault(); audio.unlock();
   if(!game) return;
   for(const t of e.changedTouches){
-    const pt=canvasPoint({clientX:t.clientX,clientY:t.clientY});
+    const pt=canvasPointFromTouch(t);
     input.mx=pt.x; input.my=pt.y; if(game.player) screenToWorld();
+    if(game.npcDialog && npcDialogHit(pt.x,pt.y)){ advanceNpcDialogue(); continue; }
     if(game.stashOpen){ handleStashClick(pt.x,pt.y); continue; }
-    if(handleJoyTouch(pt.x,pt.y,t.identifier,true)) continue;
-    if(handleMobileTap(pt.x,pt.y)) continue;
-    if(!game.attrOpen && !game.talentOpen && !game.invOpen && handleHudClick(pt.x,pt.y)) continue;
     if(game.attrOpen){ handleAttributeClick(pt.x,pt.y); continue; }
     if(game.talentOpen){ handleTalentClick(pt.x,pt.y); continue; }
     if(game.invOpen){ handleInventoryClick(pt.x,pt.y); continue; }
-    input.attack=true;
+    if(handleJoyTouch(pt.x,pt.y,t.identifier,true)) continue;
+    const btn=mobileButtonAt(pt.x,pt.y);
+    if(btn){
+      if(btn.type==='attack'){ mobileAttackTid=t.identifier; activateMobileButton(btn); continue; }
+      if(activateMobileButton(btn)) continue;
+    }
+    if(handleHudClick(pt.x,pt.y)) continue;
   }
 },{passive:false});
 canvas.addEventListener('touchmove', e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
-    const pt=canvasPoint({clientX:t.clientX,clientY:t.clientY});
+    const pt=canvasPointFromTouch(t);
     if(handleJoyTouch(pt.x,pt.y,t.identifier,false)) continue;
     input.mx=pt.x; input.my=pt.y; if(game&&game.player) screenToWorld();
+    if(mobileAttackTid===t.identifier && input.attack){
+      const aim=mobileAimPoint(game.player);
+      input.wx=aim.x; input.wy=aim.y;
+    }
   }
 },{passive:false});
 canvas.addEventListener('touchend', e=>{
   e.preventDefault();
-  for(const t of e.changedTouches){ releaseJoy(t.identifier); input.attack=false; }
+  for(const t of e.changedTouches){ releaseJoy(t.identifier); releaseMobileAttack(t.identifier); }
 },{passive:false});
 canvas.addEventListener('touchcancel', e=>{
-  for(const t of e.changedTouches) releaseJoy(t.identifier);
-  input.attack=false;
+  for(const t of e.changedTouches){ releaseJoy(t.identifier); releaseMobileAttack(t.identifier); }
 });
+document.addEventListener('gesturestart', e=>e.preventDefault());
+window.addEventListener('touchmove', e=>{ if(running) e.preventDefault(); }, {passive:false});
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
 window.addEventListener('keydown', e=>{
   audio.unlock();
