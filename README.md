@@ -1,6 +1,6 @@
 # Grimhollow
 
-A Diablo II-style caster action-RPG that runs entirely in the browser. A sorceress wakes at the last camp before a sunless crypt — cross the grave gate, break the dead, take what drops, and dive deeper.
+A Diablo II-style caster action-RPG that runs entirely in the browser. A sorceress wakes in a haunted forest outside a sunless crypt — learn the basics, cross the grave gate, break the dead, take what drops, and dive deeper.
 
 Single-file, no build step, no dependencies — it's all `index.html`.
 
@@ -10,31 +10,32 @@ Choose a save slot from the Diablo II-style character select screen. The **Mage*
 
 ## Play
 
-- **Left-click** — move; hold on a foe to cast **Firebolt**
-- **1** — **Firebolt**, a fast single-target projectile
-- **2** — **Frost Nova**, close-range crowd control
-- **3** or **Spacebar** — dodge roll toward the cursor
-- **4** — **Flame Wave**, a short cone of firebolts for packs
-- **5** — **Blood Ward**, a temporary damage-reduction shield
-- **6** — locked ultimate slot
+- **Left-click** — move; hold on a foe to cast starter **Rage Bolt**
+- **1** — **Rage Bolt**, the basic staff projectile
+- **2-6** — blank until abilities are unlocked through the talent tree
+- **Spacebar** — dodge roll toward the cursor
+- **Q** — drink a health potion
+- **E** — drink a mana potion
 - **I** — inventory & gear; inspect item cards, equip upgrades, or drop items
-- **T** — talent tree; spend level-up points on connected spell and survival upgrades
+- **T** — talent tree; unlock Firebolt, Frost Nova, Lightning Arc, Flame Wave, Blood Ward, and upgrades
 - **M** — mute / unmute audio
 - Leveling up pauses combat with an attribute screen for **Occult Power**, **Vitality**, **Willpower**, and **Agility**
 
 ## What's in it
 
-Click-to-move D2 combat with a numbered skill bar, a save-slot character select, a safe gothic camp start, a first quest to slay the **Grave Brute Warden** at Depth 3, sprite-like canvas characters, procedurally generated crypts with authored gothic landmarks, distinct zombie / skeleton / demon / brute combat roles, a phased Warden boss with charges / slams / summons, rarity-colored loot with random affixes and named unique relics that change Mage skill behavior, a dedicated inventory screen with equipped relics / backpack grid / item details / equip and drop actions, XP and leveling with attribute allocation and talent points, a gothic talent tree for pyromancy / cryomancy / arcana / survival upgrades, bundled dark ARPG audio, D2-style health/mana globes, and floor-clear portals that take you deeper.
+Click-to-move D2 combat with an authored forest tutorial start, a sparse skill bar that begins with Rage Bolt, talent-unlocked fire / frost / lightning / ward abilities, a save-slot character select, a first quest to slay the **Grave Brute Warden** at Depth 3, sprite-like canvas characters, procedurally generated crypts with authored gothic landmarks, distinct zombie / skeleton / demon / brute combat roles, a phased Warden boss with charges / slams / summons, rarity-colored loot across Diablo-like equipment slots, named unique relics that change Mage skill behavior, an inventory screen with weapon / offhand / helm / armor / gloves / boots / belt / amulet / two ring slots, refillable health and mana potions, XP and leveling with attribute allocation and talent points, bundled dark ARPG audio, D2-style health/mana globes, and floor-clear portals that take you deeper.
 
 ## Combat And Visual Feel
 
 The combat target is Diablo II mood with a faster dodge-roll rhythm. Zombies swarm and lunge, skeletons kite and line up bone shots, demons orbit and cast embers, brutes charge or slam, and the Warden seals an arena before shifting through boss phases. The current tuning uses shorter cast recovery, quicker dodge recovery, lighter monster density, and small hit-stop on impacts to make combat feel more responsive.
 
-Visual flourishes reinforce those beats: more detailed procedural sprites with stronger silhouettes, casting runes under the Mage, fire and ward lighting, deeper-floor mood shifts, boss arena sigils, charge/slam telegraphs, shockwaves, summon circles, monster death bursts, and rarity beams above magic loot.
+Visual flourishes reinforce those beats: D2-style **four-direction facing** (N/E/S/W) for the Mage and monsters, frame-based idle/walk/cast/hurt animation, **gear-driven armor layers** (helm, robe/plate, gloves, boots, belt, weapon, offhand) with rarity-colored trim, stronger procedural silhouettes, casting runes under the Mage, fire and ward lighting, deeper-floor mood shifts, boss arena sigils, charge/slam telegraphs, shockwaves, summon circles, monster death bursts, and rarity beams above magic loot.
+
+The forest tutorial now has a readable path to the crypt, layered canopy shadows and moonlight, foreground parallax, placed trees / stones / signposts, fireflies, a gothic objective panel, tutorial enemy callouts with soft green undead silhouettes, starter potion refills, and a gate that asks the player to clear the nearby dead before entering. The Mage begins in plain robes; equipping loot immediately updates the on-canvas paper-doll look.
 
 Dungeon landmarks now break up procedural floors with recognizable room identity: **Black Sarcophagus**, **Blood Altar**, **Martyr of the Gate**, **Bone Reliquary**, and **Desecrated Fountain** set pieces can appear with labels, light, and small loot/orb rewards.
 
-Special relic affixes can add Firebolt pierce, expand Frost Nova, add Flame Wave bolts, improve Blood Ward blocking, or shorten dodge recovery. Named uniques such as **Ashwake Brand**, **Winterglass Reliquary**, **Cinder Choir**, and **Vow of Red Glass** are early build-defining drops.
+Special relic affixes can add Firebolt pierce, expand Frost Nova, add Flame Wave bolts, improve Blood Ward blocking, shorten dodge recovery, or increase potion capacity through belts. Named uniques such as **Ashwake Brand**, **Winterglass Reliquary**, **Cinder Choir**, and **Vow of Red Glass** are early build-defining drops.
 
 ## Audio
 
