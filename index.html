@@ -4424,6 +4424,30 @@ function drawMobileControls(){
   }
   ctx.restore();
 }
+function mobileButtonAt(mx,my){
+  for(let i=mobileHit.length-1;i>=0;i--){
+    const h=mobileHit[i];
+    if(mx>=h.x && mx<h.x+h.w && my>=h.y && my<h.y+h.h) return h;
+  }
+  return null;
+}
+function activateMobileButton(h){
+  if(!h || !game) return false;
+  if(h.type==='attack'){
+    input.attack=true;
+    const aim=mobileAimPoint(game.player);
+    input.wx=aim.x; input.wy=aim.y;
+    return true;
+  }
+  if(h.type==='dodge'){ const aim=mobileAimPoint(game.player); input.wx=aim.x; input.wy=aim.y; doDodge(game.player); return true; }
+  if(h.type==='interact'){ tryWorldInteract(game.player); return true; }
+  if(h.type==='inv'){ audio.sfxPlay('ui'); game.invOpen=!game.invOpen; if(game.invOpen){ game.talentOpen=false; game.attrOpen=false; game.stashOpen=false; } return true; }
+  if(h.type==='talent'){ toggleTalentPanel(true); return true; }
+  if(h.type==='potion-life'){ usePotion('life'); return true; }
+  if(h.type==='potion-mana'){ usePotion('mana'); return true; }
+  if(h.type==='skill'){ useSkill(h.slot); return true; }
+  return false;
+}
 function handleMobileTap(mx,my){
   if(!mobileMode) return false;
   for(let i=mobileHit.length-1;i>=0;i--){
