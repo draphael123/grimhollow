@@ -31,6 +31,18 @@ Choose a save slot from the Diablo II-style character select screen. The **Palad
 
 Click-to-move D2 combat with town → forest → crypt progression, Smite and talent-unlocked fire / frost / lightning / ward abilities, save slots, Grave Brute Warden quest at Depth 3, procedural crypts, elite affixes, rarity loot, inventory paper-doll, potions, stamina dodge, XP/talents/attributes, bundled dark ARPG audio, and mobile-friendly touch controls.
 
+### Sprite pipeline (POC)
+
+Hybrid rendering combines **pixel-grid sprite sheets** with existing procedural fallbacks:
+
+- Character sprites draw to an offscreen buffer at integer pixel coords, then blit at **2×** with `imageSmoothingEnabled = false` for crisp pixels.
+- `loadSpriteSheet()` / `registerSpriteSheet()` / `drawSheetFrame()` infrastructure preloads on init (like audio).
+- **Paladin south walk** uses an **8-frame programmatically generated** sprite strip (16×24 native, 2× display) — contact/pass keyframes with feet planted on frames 0 and 4.
+- Other facings (N/E/W), idle south, cast, and dodge keep procedural drawing; gear trim, jewelry, and weapon overlays render on top of sheet bodies.
+- Procedural walk dirs use discrete **keyframe tables** instead of sin-wave leg swing.
+
+Future art can drop in as PNG strips via `loadSpriteSheet('key', 'assets/sprites/….png', frameW, frameH, frames)`.
+
 ## Mobile (touch devices)
 
 On phones and tablets, Grimhollow auto-detects touch input and switches to a mobile control layout:

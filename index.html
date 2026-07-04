@@ -155,10 +155,12 @@ function procShadow(sx,sy,rx,ry,a=GOTHIC.shadow){
 function animMaxFrames(state){
   if(state==='hurt') return 2;
   if(state==='idle') return 5;
-  if(state==='walk') return 6;
+  if(state==='walk') return 8;
   if(state==='cast') return 4;
   return 2;
 }
+const WALK_KEYFRAMES = [0, 0.55, 0.95, 0.55, 0, -0.55, -0.95, -0.55];
+const IDLE_KEYFRAMES = [0, 0.14, 0.24, 0.14, 0];
 function setCastAbility(p, id){ p.castAbility=id; p.castFlashMax=p.castFlash; }
 function dmgElementCol(kind){
   return ({ragebolt:'#d9b45a',firebolt:'#ff8a3a',flamewave:'#ff4a22',nova:'#7fd8ff',lightning:'#ffe06a',ward:'#ff6060'})[kind]||'#ffd86a';
@@ -2579,6 +2581,125 @@ function drawOverworldProps(d){
   }
 }
 
+// ---- hybrid sprite pipeline (pixel grid + sheet loader) ----------------------
+const SPRITES = {};
+const SPRITE_DISPLAY_SCALE = 2;
+let _pixBuf = null;
+
+function getPixelBuffer(w, h){
+  if(!_pixBuf) _pixBuf = document.createElement('canvas');
+  if(_pixBuf.width !== w || _pixBuf.height !== h){ _pixBuf.width = w; _pixBuf.height = h; }
+  return _pixBuf;
+}
+
+function registerSpriteSheet(key, source, frameW, frameH, frames){
+  SPRITES[key] = { img:source, frameW, frameH, frames, ready:true };
+}
+
+async function loadSpriteSheet(key, url, frameW, frameH, frames){
+  if(SPRITES[key]?.ready) return SPRITES[key];
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{ registerSpriteSheet(key, img, frameW, frameH, frames); resolve(SPRITES[key]); };
+    img.onerror = ()=>{ SPRITES[key] = { frameW, frameH, frames, ready:false }; resolve(SPRITES[key]); };
+    img.src = url;
+  });
+}
+
+function drawSheetFrame(key, frame, dx, dy, flipX=false, anchorY=null){
+  const s = SPRITES[key];
+  if(!s?.ready) return false;
+  const f = ((frame % s.frames) + s.frames) % s.frames;
+  const scale = SPRITE_DISPLAY_SCALE;
+  const dw = s.frameW * scale, dh = s.frameH * scale;
+  const ay = anchorY != null ? anchorY : s.frameH;
+  const px = Math.round(dx - dw / 2);
+  const py = Math.round(dy - ay * scale);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if(flipX){
+    ctx.translate(px + dw, py);
+    ctx.scale(-1, 1);
+    ctx.drawImage(s.img, f * s.frameW, 0, s.frameW, s.frameH, 0, 0, dw, dh);
+  } else {
+    ctx.drawImage(s.img, f * s.frameW, 0, s.frameW, s.frameH, px, py, dw, dh);
+  }
+  ctx.restore();
+  return true;
+}
+
+function blitPixelBuffer(drawFn, nativeW, nativeH, scale=SPRITE_DISPLAY_SCALE, footY=4){
+  const buf = getPixelBuffer(nativeW, nativeH);
+  const bctx = buf.getContext('2d');
+  bctx.imageSmoothingEnabled = false;
+  bctx.clearRect(0, 0, nativeW, nativeH);
+  bctx.save();
+  bctx.translate(Math.round(nativeW / 2), Math.round(nativeH - footY));
+  drawFn(bctx);
+  bctx.restore();
+  const dw = nativeW * scale, dh = nativeH * scale;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(buf, Math.round(-dw / 2), Math.round(-dh + footY * scale), dw, dh);
+}
+
+function pxRect(c, x, y, w, h, col){
+  if(!col) return;
+  c.fillStyle = col;
+  c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+
+function drawPaladinSouthPixelFrame(c, frame){
+  const legL = [0, 1, 1, 0, 0, -1, -1, 0][frame];
+  const legR = [0, -1, -1, 0, 0, 1, 1, 0][frame];
+  const bob = [0, 0, -1, 0, 0, 0, -1, 0][frame];
+  const arm = [0, 1, 1, 0, 0, -1, -1, 0][frame];
+  const O='#151018', H='#2a2838', T='#d9b45a', A='#586068', P='#4a5058', L='#7a8490';
+  const B='#23182f', K='#c8a868', W='#9a8860', G='#d9b45a';
+  const cx = 0, base = bob;
+  pxRect(c, cx-3+legL, 9+base, 2, 5, B);
+  pxRect(c, cx+1+legR, 9+base, 2, 5, B);
+  pxRect(c, cx-4+legL, 13+base, 3, 1, O);
+  pxRect(c, cx+1+legR, 13+base, 3, 1, O);
+  pxRect(c, cx-4, 4+base, 9, 7, A);
+  pxRect(c, cx-4, 5+base, 8, 6, P);
+  pxRect(c, cx-3, 5+base, 2, 4, L);
+  pxRect(c, cx+1, 5+base, 2, 4, L);
+  pxRect(c, cx-5, 4+base, 10, 8, O);
+  pxRect(c, cx-4, 8+base, 8, 1, T);
+  pxRect(c, cx-5+arm, 5+base, 2, 4, P);
+  pxRect(c, cx+3-arm, 5+base, 2, 4, P);
+  pxRect(c, cx-3, 1+base, 7, 5, H);
+  pxRect(c, cx-3, 1+base, 6, 1, T);
+  pxRect(c, cx-2, 3+base, 5, 2, O);
+  pxRect(c, cx-2, 3+base, 1, 1, K);
+  pxRect(c, cx+1, 3+base, 1, 1, K);
+  pxRect(c, cx-1, 3+base, 1, 1, O);
+  pxRect(c, cx+3, 2+base, 1, 9, W);
+  pxRect(c, cx+4, 1+base, 1, 2, G);
+  pxRect(c, cx-4, 4+base, 1, 9, O);
+  pxRect(c, cx+4, 2+base, 1, 8, O);
+}
+
+function generatePaladinWalkSouthSheet(){
+  const FW = 16, FH = 24, FRAMES = 8;
+  const sheet = document.createElement('canvas');
+  sheet.width = FW * FRAMES;
+  sheet.height = FH;
+  const sctx = sheet.getContext('2d');
+  sctx.imageSmoothingEnabled = false;
+  for(let i=0; i<FRAMES; i++){
+    sctx.save();
+    sctx.translate(i * FW + FW / 2, FH - 4);
+    drawPaladinSouthPixelFrame(sctx, i);
+    sctx.restore();
+  }
+  registerSpriteSheet('paladin_walk_south', sheet, FW, FH, FRAMES);
+}
+
+function preloadSprites(){
+  generatePaladinWalkSouthSheet();
+}
+
 // ---- player armor visuals (gear-driven, procedural) -------------------------
 function gearTier(it){ return it?.unique ? 5 : (it?.rarity?.n ?? 0); }
 function gearTrim(it, a=1, fb='#d9b45a'){ return it?.rarity?.col || fb; }
@@ -2596,11 +2717,13 @@ function playerRobeFill(p){
 }
 function playerAnimPose(p, moving){
   const f=p.animFrame||0;
-  const walkPhase=Math.sin((f/6)*Math.PI*2);
-  const idlePhase=Math.sin((f/5)*Math.PI*2)*0.35;
+  const state=p.animState||'idle';
+  let step=0;
+  if(state==='walk') step=WALK_KEYFRAMES[f % WALK_KEYFRAMES.length];
+  else if(state==='idle') step=IDLE_KEYFRAMES[f % IDLE_KEYFRAMES.length];
   return {
-    state:p.animState||'idle', step:p.animState==='walk'?walkPhase:(p.animState==='idle'?idlePhase:0),
-    frame:f, cast:p.castFlash>0?p.castFlash/(p.castFlashMax||0.26):0,
+    state, step, frame:f,
+    cast:p.castFlash>0?p.castFlash/(p.castFlashMax||0.26):0,
     castAbility:p.castAbility||'rage', hit:p.hurt>0, dodge:p.dodge>0
   };
 }
@@ -2620,6 +2743,14 @@ function drawPlayerDodgePose(p, pose, robe, trim, facing){
   ctx.strokeStyle='#8b6a36'; ctx.lineWidth=3;
   ctx.beginPath(); ctx.moveTo(6,0); ctx.lineTo(24,-4); ctx.stroke();
   ctx.fillStyle=gearTrim(p.gear.weapon); ctx.beginPath(); ctx.arc(26,-6,4,0,6.28); ctx.fill();
+}
+
+function drawPlayerGearOverlaySouth(p, pose, trim){
+  drawPlayerBelt(p, trim);
+  ctx.strokeStyle=gearTrimA(p.gear.helm||p.gear.armor,0.55); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-7,5); ctx.lineTo(-2,13); ctx.moveTo(7,5); ctx.lineTo(2,13); ctx.stroke();
+  drawPlayerJewelryGlow(p, pose.cast);
+  drawPlayerWeaponOffhand(p, pose.cast, trim, pose);
 }
 
 function drawPlayerFigureSouth(p, pose, robe, trim){
@@ -2890,8 +3021,9 @@ function drawPlayerSprite(p){
   }
   const moving = p.moveTx!=null || p.dodge>0;
   const pose = playerAnimPose(p, moving);
-  const bob = pose.state==='walk' ? pose.step*2.5 : (pose.state==='idle' ? pose.step*0.8 : 0);
   const facing = p.facing ?? 1;
+  const southWalkSheet = facing===1 && pose.state==='walk' && SPRITES.paladin_walk_south?.ready;
+  const bob = southWalkSheet ? 0 : (pose.state==='walk' ? pose.step*2.5 : (pose.state==='idle' ? pose.step*0.8 : 0));
   const robe = playerRobeFill(p);
   const trim = gearTrim(p.gear.armor) || gearTrim(p.gear.helm);
   procShadow(2,p.r*0.84,p.r*1.15,p.r*0.42);
@@ -2920,7 +3052,16 @@ function drawPlayerSprite(p){
     }
     ctx.save();
     if(facing===2) ctx.scale(-1,1);
-    if(facing===3) drawPlayerFigureNorth(p, pose, robe, trim);
+    const useSouthSheet = southWalkSheet;
+    if(useSouthSheet){
+      if(pose.hit) ctx.scale(1.14,0.88);
+      const sheetFrame = pose.frame % 8;
+      if(drawSheetFrame('paladin_walk_south', sheetFrame, 0, 14, false, 24)){
+        drawPlayerGearOverlaySouth(p, pose, trim);
+      } else {
+        drawPlayerFigureSouth(p, pose, robe, trim);
+      }
+    } else if(facing===3) drawPlayerFigureNorth(p, pose, robe, trim);
     else if(facing===0||facing===2) drawPlayerFigureSide(p, pose, robe, trim, facing===2);
     else drawPlayerFigureSouth(p, pose, robe, trim);
     if((p.equipFlash||0)>0){
@@ -4600,6 +4741,7 @@ setInterval(()=>{
       addFloat(p.x,p.y-30,l.it.name,l.it.rarity.col); } } }
 },80);
 
+preloadSprites();
 showCharacterSelect();
 </script>
 </body>
