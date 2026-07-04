@@ -463,6 +463,7 @@ function genCamp(){
       {kind:'candles',x:14.7*TILE,y:5.6*TILE},
       {kind:'candles',x:20.3*TILE,y:5.7*TILE}
     ],
+    graveyard:{ x:17.5*TILE, y:19.2*TILE },
     solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1
   };
   return camp;
