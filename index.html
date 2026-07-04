@@ -163,8 +163,13 @@ const WALK_KEYFRAMES = [0, 0.55, 0.95, 0.55, 0, -0.55, -0.95, -0.55];
 const IDLE_KEYFRAMES = [0, 0.14, 0.24, 0.14, 0];
 function setCastAbility(p, id){ p.castAbility=id; p.castFlashMax=p.castFlash; }
 function dmgElementCol(kind){
-  return ({ragebolt:'#d9b45a',firebolt:'#ff8a3a',flamewave:'#ff4a22',nova:'#7fd8ff',lightning:'#ffe06a',ward:'#ff6060'})[kind]||'#ffd86a';
+  return ({holybolt:'#ffe08a',holystrike:'#ffd86a',ragebolt:'#d9b45a',firebolt:'#ff8a3a',flamewave:'#ff4a22',nova:'#7fd8ff',lightning:'#ffe06a',ward:'#ff6060'})[kind]||'#ffd86a';
 }
+const SMITE_MANA = 3;
+const SMITE_MELEE_RANGE = 72;
+const LOOT_LINGER_COMMON = 0.22;
+const LOOT_LINGER_MAGIC = 0.30;
+const LOOT_LINGER_RARE = 0.36;
 
 // ============================================================================
 //  GAME STATE
@@ -368,6 +373,10 @@ const audio = {
     if(name==='kill'){ this.tone(92,0.28,'sawtooth',0.11,this.sfx,-45); this.noise(t,0.18,0.12,360,'lowpass'); return; }
     if(name==='hurt'){ this.tone(120,0.18,'sawtooth',0.10,this.sfx,-40); return; }
     if(name==='loot'){ this.tone(660,0.12,'triangle',0.09,this.sfx,260); this.tone(980,0.18,'sine',0.05,this.sfx,120); return; }
+    if(name==='lootMagic'){ this.tone(740,0.14,'triangle',0.10,this.sfx,320); this.tone(1100,0.20,'sine',0.06,this.sfx,180); return; }
+    if(name==='lootRare'){ this.tone(520,0.10,'triangle',0.11,this.sfx,280); this.tone(880,0.22,'sine',0.08,this.sfx,200); this.tone(1320,0.16,'triangle',0.05,this.sfx,140); return; }
+    if(name==='lootEpic'){ this.tone(440,0.12,'sawtooth',0.10,this.sfx,360); this.tone(660,0.24,'triangle',0.09,this.sfx,220); this.tone(990,0.28,'sine',0.07,this.sfx,160); return; }
+    if(name==='smite'){ this.tone(520,0.10,'triangle',0.10,this.sfx,180); this.tone(780,0.16,'sine',0.07,this.sfx,90); this.noise(t,0.08,0.06,1400,'highpass'); return; }
     if(name==='level'){ this.tone(392,0.28,'triangle',0.12); setTimeout(()=>this.tone(587,0.36,'triangle',0.12),90); return; }
     if(name==='boss'){ this.tone(70,0.62,'sawtooth',0.18,this.sfx,-18); this.noise(t,0.55,0.10,280,'lowpass'); return; }
     if(name==='quest'){ this.tone(330,0.22,'triangle',0.11); setTimeout(()=>this.tone(495,0.28,'triangle',0.1),120); return; }
@@ -383,8 +392,15 @@ const audio = {
     if(name==='footDungeon'){ this.noise(t,0.055,0.045,780,'bandpass'); this.tone(120,0.03,'sine',0.03,this.sfx,-20); return; }
   },
   hitPlay(element){
-    const map={firebolt:'hitFire',flamewave:'hitFire',flame:'hitFire',nova:'hitFrost',lightning:'hitLightning',ragebolt:'hitRage',rage:'hitRage',ward:'hit'};
+    const map={firebolt:'hitFire',flamewave:'hitFire',flame:'hitFire',nova:'hitFrost',lightning:'hitLightning',holybolt:'hitRage',holystrike:'hitRage',ragebolt:'hitRage',rage:'hitRage',ward:'hit'};
     this.sfxPlay(map[element]||'hit');
+  },
+  lootPickupSound(it){
+    const n=it?.rarity?.n||0;
+    if(it?.unique || n>=3) this.sfxPlay('lootEpic');
+    else if(n>=2) this.sfxPlay('lootRare');
+    else if(n>=1) this.sfxPlay('lootMagic');
+    else this.sfxPlay('loot');
   },
   footstepPlay(surface){
     const map={grass:'footGrass',dirt:'footDirt',stone:'footStone',dungeon:'footDungeon'};
@@ -677,15 +693,15 @@ const UNIQUE_ITEMS = [
 ];
 
 const TALENTS = [
-  {id:'ember', name:'Learn Firebolt', branch:'PYROMANCY', x:90, y:118, max:1, req:[], col:'#ff8a3a',
-    desc:'Unlocks Firebolt on skill slot 2 and begins the fire spell path.'},
-  {id:'forked', name:'Forked Fire', branch:'PYROMANCY', x:90, y:230, max:2, req:['ember'], col:'#ff6a32',
+  {id:'ember', name:'Path of Retribution', branch:'RETRIBUTION', x:90, y:118, max:1, req:[], col:'#ff8a3a',
+    desc:'Holy wrath path — unlocks Firebolt on slot 2 for punishing ranged fire.'},
+  {id:'forked', name:'Forked Fire', branch:'RETRIBUTION', x:90, y:230, max:2, req:['ember'], col:'#ff6a32',
     desc:'Firebolt gains two side sparks per rank.'},
-  {id:'inferno', name:'Learn Flame Wave', branch:'PYROMANCY', x:90, y:342, max:1, req:['forked'], col:'#ff4a22',
+  {id:'inferno', name:'Learn Flame Wave', branch:'RETRIBUTION', x:90, y:342, max:1, req:['forked'], col:'#ff4a22',
     desc:'Unlocks Flame Wave on skill slot 5.'},
-  {id:'frost', name:'Learn Frost Nova', branch:'CRYOMANCY', x:210, y:118, max:1, req:[], col:'#7fd8ff',
-    desc:'Unlocks Frost Nova on skill slot 3.'},
-  {id:'shatter', name:'Shatter Veil', branch:'CRYOMANCY', x:210, y:230, max:3, req:['frost'], col:'#a8ecff',
+  {id:'frost', name:'Path of Sanctuary', branch:'SANCTUARY', x:210, y:118, max:1, req:[], col:'#7fd8ff',
+    desc:'Holy shelter path — unlocks Frost Nova on slot 3 to control and protect.'},
+  {id:'shatter', name:'Shatter Veil', branch:'SANCTUARY', x:210, y:230, max:3, req:['frost'], col:'#a8ecff',
     desc:'Frost Nova deals +10% damage per rank.'},
   {id:'storm', name:'Learn Lightning Arc', branch:'LIGHTNING', x:330, y:118, max:1, req:[], col:'#ffe06a',
     desc:'Unlocks Lightning Arc on skill slot 4.'},
@@ -697,14 +713,14 @@ const TALENTS = [
     desc:'Unlocks Blood Ward on skill slot 6.'},
   {id:'step', name:'Shadow Step', branch:'ARCANA', x:450, y:342, max:3, req:['quick'], col:'#c8d8ff',
     desc:'Dodge roll cooldown is reduced per rank.'},
-  {id:'vital', name:'Grave Vitality', branch:'SURVIVAL', x:570, y:118, max:3, req:[], col:'#7ac83a',
-    desc:'+14 max life and +4 max mana per rank.'},
-  {id:'siphon', name:'Soul Siphon', branch:'SURVIVAL', x:570, y:230, max:2, req:['vital'], col:'#d9b45a',
+  {id:'vital', name:'Grave Vitality', branch:'SANCTUARY', x:570, y:118, max:3, req:[], col:'#7ac83a',
+    desc:'+14 max life and +4 max mana per rank — sustains the holy warrior.'},
+  {id:'siphon', name:'Soul Siphon', branch:'SANCTUARY', x:570, y:230, max:2, req:['vital'], col:'#d9b45a',
     desc:'Improves life and mana regeneration per rank.'},
 ];
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map(t=>[t.id,t]));
 const ABILITIES = {
-  rage:{slot:1,label:'Smite',name:'Smite',unlock:null,cd:'castCd',max:p=>0.34/p.castMul,col:'#d9b45a',mana:0},
+  rage:{slot:1,label:'Smite',name:'Smite',unlock:null,cd:'smiteCd',max:p=>0.34/p.castMul,col:'#d9b45a',mana:SMITE_MANA},
   firebolt:{slot:2,label:'Fire',name:'Firebolt',unlock:'ember',cd:'castCd',max:p=>0.22/p.castMul,col:'#ff8a3a',mana:4},
   nova:{slot:3,label:'Nova',name:'Frost Nova',unlock:'frost',cd:'novaCd',max:p=>0.82/p.castMul,col:'#5a9aff',mana:18},
   lightning:{slot:4,label:'Arc',name:'Lightning Arc',unlock:'storm',cd:'lightCd',max:p=>0.58/p.castMul,col:'#ffe06a',mana:10},
@@ -768,7 +784,7 @@ function rollItem(depth){
 //  PLAYER
 // ============================================================================
 function givePaladinStarterGear(p){
-  p.gear.weapon={slot:'weapon',rarity:RARITIES[0],name:'Training Sword',affixes:[{k:'spell',label:'% Spell Damage',v:8,suffix:'%'}],ilvl:0,score:24};
+  p.gear.weapon={slot:'weapon',rarity:RARITIES[0],name:'Training Sword',affixes:[{k:'spell',label:'% Smite Damage',v:10,suffix:'%'},{k:'life',label:'Max Life',v:10}],ilvl:0,score:28};
   p.gear.offhand={slot:'offhand',rarity:RARITIES[0],name:'Faith Shield',affixes:[{k:'life',label:'Max Life',v:12}],ilvl:0,score:12};
   recompute(p);
 }
@@ -790,7 +806,7 @@ function newPlayer(){
     // movement / combat runtime
     moveTx:null, moveTy:null,
     dodge:0, dodgeCd:0, dodgeDx:0, dodgeDy:0,
-    castCd:0, novaCd:0, lightCd:0, waveCd:0, wardCd:0, ward:0, castFlash:0, castAbility:'rage', hurt:0, trail:[],
+    castCd:0, smiteCd:0, novaCd:0, lightCd:0, waveCd:0, wardCd:0, ward:0, castFlash:0, castAbility:'rage', hurt:0, trail:[],
     animPhase:0, equipFlash:0, footT:0,
     slow:0, poison:0, poisonDps:0,
     dead:false, dying:false, deathT:0, deathDur:0.54, deathFrame:0,
@@ -1086,13 +1102,16 @@ function spawnForestEnemies(stage){
       game.monsters.push(m2);
     }
   } else if(stage===3){
-    for(const spot of [{x:10.5*TILE,y:11.5*TILE},{x:24*TILE,y:10*TILE}]){
-      const m=spawnMonster('zombie',spot.x,spot.y,0);
+    const spots=[{x:10.5*TILE,y:11.5*TILE},{x:24*TILE,y:10*TILE},{x:16*TILE,y:14*TILE},{x:20*TILE,y:16*TILE},{x:12*TILE,y:18*TILE}];
+    const count=randi(4,5);
+    for(let i=0;i<count;i++){
+      const spot=spots[i];
+      const m=spawnMonster('zombie',spot.x+rand(-12,12),spot.y+rand(-10,10),0);
       m.name='Lost Dead'; m.hp=24; m.maxhp=24; m.dmg=5; m.speed=52; m.xp=8; m.col='#789a68'; m.tutorial=true;
       game.monsters.push(m);
     }
-    game.loot.push({x:14.2*TILE,y:17.2*TILE,orb:'lifePotion',bob:rand(0,6.28)});
-    game.loot.push({x:20.5*TILE,y:14.6*TILE,orb:'manaPotion',bob:rand(0,6.28)});
+    game.loot.push({x:14.2*TILE,y:17.2*TILE,orb:'lifePotion',bob:rand(0,6.28),spawnT:game.t});
+    game.loot.push({x:20.5*TILE,y:14.6*TILE,orb:'manaPotion',bob:rand(0,6.28),spawnT:game.t});
   }
   game.killGoal=game.monsters.length;
 }
@@ -1150,25 +1169,29 @@ function buildFloor(){
   for(let i=1;i<d.rooms.length;i++){
     if(game.depth===3 && game.quest?.status!=='complete' && i===d.rooms.length-1) continue;
     const r = d.rooms[i];
-    const packSize = randi(2,4) + Math.floor(game.depth*0.45);
+    const packSize = randi(3,6) + Math.floor(game.depth*0.68);
     for(let k=0;k<packSize;k++){
-      const mx = (r.x + rand(1,r.w-1))*TILE;
-      const my = (r.y + rand(1,r.h-1))*TILE;
-      let type = 'zombie';
+      const frontline = k < Math.ceil(packSize*0.55);
+      let type = frontline ? 'zombie' : (chance(0.72) ? 'skeleton' : 'zombie');
+      if(!frontline && chance(0.08) && game.depth>=2) type='demon';
+      else if(frontline && chance(0.06) && game.depth>=1) type='brute';
       const roll = Math.random();
-      if(roll<0.34) type='skeleton';
-      else if(roll>0.92 && game.depth>=1) type='brute';
-      else if(roll>0.78 && game.depth>=2) type='demon';
+      if(frontline && roll<0.12 && game.depth>=1) type='brute';
+      else if(!frontline && roll>0.88 && game.depth>=2) type='demon';
+      const biasX = frontline ? 0.38 : 0.62;
+      const biasY = frontline ? 0.42 : 0.58;
+      const mx = (r.x + 1 + Math.floor((r.w-2)*biasX) + rand(-1,1))*TILE + rand(-8,8);
+      const my = (r.y + 1 + Math.floor((r.h-2)*biasY) + rand(-1,1))*TILE + rand(-8,8);
       game.monsters.push(tryMakeElite(spawnMonster(type, mx, my, game.depth)));
     }
   }
   for(const lm of d.landmarks||[]){
     if(lm.kind==='reliquary'){
-      game.loot.push({x:lm.x+rand(-18,18),y:lm.y+rand(-14,14),it:rollItem(game.depth+1),bob:rand(0,6.28)});
+      pushLoot(lm.x+rand(-18,18),lm.y+rand(-14,14),{it:rollItem(game.depth+1)});
     } else if(lm.kind==='bloodAltar'){
-      game.loot.push({x:lm.x+rand(-16,16),y:lm.y+rand(-12,12),orb:'life',bob:rand(0,6.28)});
+      game.loot.push({x:lm.x+rand(-16,16),y:lm.y+rand(-12,12),orb:'life',bob:rand(0,6.28),spawnT:game.t});
     } else if(lm.kind==='sarcophagus' && chance(0.45)){
-      game.loot.push({x:lm.x+rand(-18,18),y:lm.y+rand(-12,12),it:rollItem(game.depth),bob:rand(0,6.28)});
+      pushLoot(lm.x+rand(-18,18),lm.y+rand(-12,12),{it:rollItem(game.depth)});
     }
   }
   if(game.depth===3 && game.quest?.status!=='complete'){
@@ -1311,18 +1334,36 @@ function canWorldInteract(p){
 //  CASTING
 // ============================================================================
 function combatScene(){ return game.scene==='forest2'||game.scene==='forest3'||game.scene==='dungeon'; }
-function tryRageBolt(p){
-  if(p.castCd>0 || p.dodge>0 || !combatScene()) return;
-  p.castCd = 0.34 / p.castMul;
+function tryRageBolt(p, aimTarget=null){
+  if(p.smiteCd>0 || p.dodge>0 || !combatScene()) return;
+  if(p.mana<SMITE_MANA){ audio.sfxPlay('error'); addFloat(p.x,p.y-28,'Need mana','#5a9aff'); return; }
+  p.mana -= SMITE_MANA;
+  p.smiteCd = 0.34 / p.castMul;
   p.castFlash = 0.12;
   setCastAbility(p,'rage');
-  const ang = Math.atan2(input.wy - p.y, input.wx - p.x);
-  aimFacing(p, input.wx, input.wy);
-  const dmg = Math.round((p.baseSpell*0.72 + p.level*1.5) * p.spellMul * rand(0.85,1.12));
-  game.projectiles.push({ kind:'ragebolt', x:p.x, y:p.y, dx:Math.cos(ang), dy:Math.sin(ang),
-    speed:500, dmg, life:0.9, maxLife:0.9, r:5, t:0, pierce:0, trail:[] });
-  addFx('cast', p.x+Math.cos(ang)*15, p.y+Math.sin(ang)*15, '#d9b45a');
-  audio.sfxPlay('firebolt');
+  let tx=input.wx, ty=input.wy;
+  const target = aimTarget || nearestAttackTarget(p);
+  if(target){ tx=target.x; ty=target.y; }
+  aimFacing(p, tx, ty);
+  const crit = rollCrit(p);
+  const baseDmg = (p.baseSpell*0.72 + p.level*1.5) * p.spellMul * rand(0.85,1.12);
+  const dmg = Math.round(baseDmg * (crit ? 1.5 : 1));
+  if(target && dist(p.x,p.y,target.x,target.y) < SMITE_MELEE_RANGE + target.r){
+    hitMonster(target, dmg, p.x, p.y, 160, '#ffe08a', 'holystrike', {crit});
+    for(let i=0;i<14;i++){ const a=rand(0,6.28);
+      game.fx.push({kind:'spark',x:target.x,y:target.y,dx:Math.cos(a),dy:Math.sin(a),
+        speed:rand(60,200),life:0.35,t:0,col:i%3?'#fff8d0':'#d9b45a'}); }
+    addRing(target.x,target.y,target.r+10,'#ffe08a',0.32);
+    addFx('burst', target.x, target.y, '#ffd86a');
+    audio.sfxPlay('smite');
+    return;
+  }
+  const ang = Math.atan2(ty - p.y, tx - p.x);
+  game.projectiles.push({ kind:'holybolt', x:p.x, y:p.y, dx:Math.cos(ang), dy:Math.sin(ang),
+    speed:520, dmg, life:0.85, maxLife:0.85, r:6, t:0, pierce:0, trail:[], crit });
+  addFx('cast', p.x+Math.cos(ang)*15, p.y+Math.sin(ang)*15, '#ffe08a');
+  addRing(p.x+Math.cos(ang)*12,p.y+Math.sin(ang)*12,14,'#fff8d0',0.14);
+  audio.sfxPlay('smite');
 }
 function tryFirebolt(p){
   if(!abilityUnlocked(p,'firebolt')){ addFloat(p.x,p.y-30,'Unlock Firebolt in talents','#6a6656'); audio.sfxPlay('error'); return; }
@@ -1439,16 +1480,20 @@ function useSkill(n){
 // ============================================================================
 //  COMBAT RESOLUTION
 // ============================================================================
-function hitMonster(m, dmg, fromx, fromy, knock, col, element){
+function hitMonster(m, dmg, fromx, fromy, knock, col, element, opts={}){
   m.hp -= dmg;
   audio.hitPlay(element||'hit');
-  m.flinch = 0.14; m.hurt = 0.12;
-  game.hitStop = Math.max(game.hitStop, m.boss ? 0.052 : m.elite ? 0.038 : 0.032);
-  const eCol = col || dmgElementCol(element);
-  addFloat(m.x, m.y-m.r-6, dmg, eCol, {dmg:true, drift:(Math.random()-0.5)*22});
-  spatter(m.x, m.y, eCol, 8);
+  const holy = element==='holystrike' || element==='holybolt';
+  m.flinch = holy ? 0.21 : 0.14;
+  m.hurt = holy ? 0.16 : 0.12;
+  game.hitStop = Math.max(game.hitStop, m.boss ? 0.052 : m.elite ? 0.038 : holy ? 0.036 : 0.032);
+  const eCol = opts.crit ? '#ffe040' : (col || dmgElementCol(element));
+  const dmgTxt = opts.crit ? dmg+'!' : dmg;
+  addFloat(m.x, m.y-m.r-6, dmgTxt, eCol, {dmg:true, drift:(Math.random()-0.5)*22, crit:!!opts.crit, scale:opts.crit?1.55:1.35});
+  spatter(m.x, m.y, eCol, opts.crit?12:8);
   addRing(m.x, m.y, m.r+6, eCol, 0.28);
   addRing(m.x, m.y, m.r+2, '#fff8e8', 0.1);
+  if(holy) addRing(m.x, m.y, m.r+12, '#fff8d0', 0.18);
   game.fx.push({kind:'impact', x:m.x, y:m.y, r:m.r+4, life:0.14, t:0, col:eCol});
   if(chance(0.45)) game.fx.push({kind:'decal', sub:'blood', x:m.x+rand(-6,6), y:m.y+rand(-6,6), r:rand(8,18), rot:rand(0,6.28), life:12, t:0, col:'rgba(90,10,10,0.26)'});
   if(knock){
@@ -1466,6 +1511,8 @@ function finalizeMonsterDeath(m){
   if(m.dead) return;
   m.dead = true; m.dying = false;
   audio.sfxPlay(m.boss?'boss':'kill');
+  addFloat(m.x, m.y-m.r-20, 'SLAIN', '#fff8c0', {life:0.55, vy:-48, scale:1.7});
+  game.hitStop = Math.max(game.hitStop, m.boss ? 0.065 : 0.048);
   spatter(m.x, m.y, '#8a1818', 18);
   addFx('burst', m.x, m.y, m.col);
   addRing(m.x, m.y, m.r+18, m.col, 0.38);
@@ -1500,7 +1547,7 @@ function finalizeMonsterDeath(m){
     p.talentPoints++;
     p.attrPoints += 2;
     const reward=rollItem(game.depth+3); reward.rarity=RARITIES[2]; reward.name='Warden\'s '+pick(ITEM_NOUNS[reward.slot]);
-    game.loot.push({x:m.x+18,y:m.y,it:reward,bob:rand(0,6.28)});
+    pushLoot(m.x+18,m.y,{it:reward});
     addFloat(p.x,p.y-42,'QUEST COMPLETE! +1 TALENT +2 ATTRIBUTES','#d9b45a');
     audio.sfxPlay('quest');
     audio.setMusic('dungeon');
@@ -1510,16 +1557,16 @@ function finalizeMonsterDeath(m){
   const dropChance = m.elite ? 0.78 : (m.type==='brute' ? 0.9 : 0.32);
   if(chance(dropChance)){
     const it = m.elite ? rollEliteLoot(game.depth) : rollItem(game.depth);
-    game.loot.push({ x:m.x+rand(-8,8), y:m.y+rand(-8,8), it, bob:rand(0,6.28) });
+    pushLoot(m.x+rand(-8,8),m.y+rand(-8,8),{it});
   }
   if(m.elite){
     const bonus=rollEliteLoot(game.depth);
-    game.loot.push({ x:m.x+rand(-14,14), y:m.y+rand(-10,10), it:bonus, bob:rand(0,6.28) });
-    if(chance(0.38)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28) });
+    pushLoot(m.x+rand(-14,14),m.y+rand(-10,10),{it:bonus});
+    if(chance(0.38)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28), spawnT:game.t });
     addFloat(m.x,m.y-m.r-22,'ELITE LOOT','#d9b45a');
   }
-  if(chance(m.elite?0.32:0.20)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28) });
-  if(chance(0.035)) game.loot.push({ x:m.x+rand(-10,10), y:m.y+rand(-10,10), orb:chance(0.5)?'fullLife':'fullMana', bob:rand(0,6.28) });
+  if(chance(m.elite?0.32:0.20)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:chance(0.52)?'lifePotion':'manaPotion', bob:rand(0,6.28), spawnT:game.t });
+  if(chance(0.035)) game.loot.push({ x:m.x+rand(-10,10), y:m.y+rand(-10,10), orb:chance(0.5)?'fullLife':'fullMana', bob:rand(0,6.28), spawnT:game.t });
 }
 function killMonster(m){ if(!m.dead && !m.dying) beginMonsterDeath(m); else if(m.dying) finalizeMonsterDeath(m); }
 function levelUp(p){
@@ -1639,7 +1686,50 @@ function refillPotion(type,full=false){
 }
 
 // ---- floaters / particles ----
-function addFloat(x,y,txt,col,opts={}){ game.floaters.push({x,y,txt:''+txt,col,life:opts.life||0.9,t:0,vy:-38, vx:(opts.drift||0), dmg:!!opts.dmg, scale:opts.dmg?1.35:1}); }
+function addFloat(x,y,txt,col,opts={}){ game.floaters.push({x,y,txt:''+txt,col,life:opts.life||0.9,t:0,vy:opts.vy!=null?opts.vy:-38, vx:(opts.drift||0), dmg:!!opts.dmg, scale:opts.scale||(opts.dmg?1.35:1), crit:!!opts.crit}); }
+function lootLingerTime(it){
+  const n=it?.rarity?.n||0;
+  if(it?.unique || n>=3) return LOOT_LINGER_RARE;
+  if(n>=1) return LOOT_LINGER_MAGIC;
+  return LOOT_LINGER_COMMON;
+}
+function pushLoot(x,y,data){
+  const l={x,y,bob:rand(0,6.28),spawnT:game.t,...data};
+  game.loot.push(l);
+  if(l.it && (l.it.rarity.n||0)>=1){
+    const label=(l.it.rarity.name?l.it.rarity.name+' ':'')+l.it.name;
+    addFloat(x,y-32,label,l.it.rarity.col,{life:1.15,vy:-32,drift:(Math.random()-0.5)*12});
+  }
+  return l;
+}
+function pickupItemLoot(l){
+  const p=game.player;
+  if(!l.it || l.taken || p.bag.length>=24) return false;
+  p.bag.push(l.it); l.taken=true; saveCurrent();
+  audio.lootPickupSound(l.it);
+  addFloat(p.x,p.y-30,l.it.name,l.it.rarity.col);
+  return true;
+}
+function tryPickupLootClick(wx,wy){
+  for(const l of game.loot){
+    if(l.taken || !l.it) continue;
+    const by=l.y+Math.sin(l.bob)*3;
+    if(dist(wx,wy,l.x,by)>22) continue;
+    const linger=lootLingerTime(l.it);
+    if((l.it.rarity.n||0)>=1 || game.t-(l.spawnT||0)>=linger) return pickupItemLoot(l);
+  }
+  return false;
+}
+function nearestAttackTarget(p,maxRange=300){
+  let best=null,bestD=maxRange;
+  for(const m of game.monsters){
+    if(m.dead) continue;
+    const d=dist(p.x,p.y,m.x,m.y);
+    if(d<bestD+m.r){ bestD=d; best=m; }
+  }
+  return best;
+}
+function rollCrit(p){ return chance(0.08 + stat(p,'spell')*0.001); }
 function addToast(txt,col='#d9b45a',life=2.6){ if(!game) return; game.toasts.push({txt,col,life,t:0}); }
 function spatter(x,y,col,n){ for(let i=0;i<n;i++){ const a=rand(0,6.28),s=rand(30,150);
   game.fx.push({kind:'spark',x,y,dx:Math.cos(a),dy:Math.sin(a),speed:s,life:rand(0.25,0.6),t:0,col}); } }
@@ -1833,6 +1923,7 @@ function update(dt){
 
   // ---- timers / regen ----
   p.castCd  = Math.max(0,p.castCd-dt);
+  p.smiteCd = Math.max(0,p.smiteCd-dt);
   p.novaCd  = Math.max(0,p.novaCd-dt);
   p.lightCd = Math.max(0,p.lightCd-dt);
   p.waveCd  = Math.max(0,p.waveCd-dt);
@@ -1893,7 +1984,11 @@ function update(dt){
     const clickNpc=npcAt(input.wx,input.wy);
     if(clickNpc && dist(p.x,p.y,clickNpc.x,clickNpc.y)<clickNpc.r+36){ openNpcDialogue(clickNpc); }
     else if(sceneIsTown() && game.dungeon?.stash && dist(input.wx,input.wy,game.dungeon.stash.x,game.dungeon.stash.y)<40 && stashNearPlayer(p)){ toggleStash(true); audio.sfxPlay('ui'); }
-    else if(hoverMon){ p.moveTx=null; tryRageBolt(p); }
+    else if(hoverMon){
+      p.moveTx=null; p.moveTy=null;
+      if(!mobileMode){ input.wx=hoverMon.x; input.wy=hoverMon.y; }
+      tryRageBolt(p, mobileMode ? null : hoverMon);
+    }
     else { p.moveTx = input.wx; p.moveTy = input.wy; }
   }
   if(input.right && !game.invOpen && !game.talentOpen){ useSkill(2); }
@@ -1952,7 +2047,8 @@ function update(dt){
     if(d.solid(tx,ty)){ pr.life=0; spatter(pr.x,pr.y,pr.kind==='flamewave'?'#ff4a22':'#ff8a3a',4); addRing(pr.x,pr.y,18,pr.kind==='flamewave'?'#ff4a22':'#ff8a3a',0.2); continue; }
     for(const m of game.monsters){ if(m.dead) continue;
       if(dist(pr.x,pr.y,m.x,m.y) < m.r+pr.r){
-        hitMonster(m, pr.dmg, pr.x-pr.dx*10, pr.y-pr.dy*10, pr.kind==='flamewave'?130:180, null, pr.kind);
+        const prCrit = pr.crit;
+        hitMonster(m, pr.dmg, pr.x-pr.dx*10, pr.y-pr.dy*10, pr.kind==='flamewave'?130:180, null, pr.kind, {crit:prCrit});
         if(pr.pierce>0){ pr.pierce--; pr.dmg=Math.ceil(pr.dmg*0.72); addFloat(pr.x,pr.y-12,'PIERCE','#ffb050'); }
         else { pr.life=0; break; } }
     }
@@ -1992,7 +2088,8 @@ function update(dt){
   game.fx = game.fx.filter(f=>f.t<f.life);
 
   // ---- floaters ----
-  for(const fl of game.floaters){ fl.t+=dt; fl.y+=fl.vy*dt; fl.x+=(fl.vx||0)*dt; fl.vy*=0.94; if(fl.dmg) fl.scale=1.35+Math.sin(fl.t*18)*0.08; }
+  for(const fl of game.floaters){ fl.t+=dt; fl.y+=fl.vy*dt; fl.x+=(fl.vx||0)*dt; fl.vy*=0.94;
+    if(fl.dmg) fl.scale=(fl.crit?1.55:1.35)+Math.sin(fl.t*18)*0.08; }
   game.floaters = game.floaters.filter(fl=>fl.t<fl.life);
   for(const t of (game.toasts||[])) t.t+=dt;
   game.toasts = (game.toasts||[]).filter(t=>t.t<t.life);
@@ -2095,6 +2192,7 @@ function drawLight(x,y,r,col,alpha=0.28){
 
 function projectileLight(pr){
   if(pr.kind==='flamewave') return {r:76,col:'rgba(255,70,32,ALPHA)',a:0.28};
+  if(pr.kind==='holybolt') return {r:58,col:'rgba(255,224,138,ALPHA)',a:0.26};
   if(pr.kind==='ragebolt') return {r:52,col:'rgba(217,180,90,ALPHA)',a:0.22};
   if(pr.kind==='firebolt') return {r:62,col:'rgba(255,120,40,ALPHA)',a:0.26};
   return {r:58,col:'rgba(255,160,60,ALPHA)',a:0.24};
@@ -3602,25 +3700,30 @@ function render(){
   // ---- projectiles ----
   for(const pr of game.projectiles){
     const hot = pr.kind==='flamewave';
+    const holy = pr.kind==='holybolt';
     const rage = pr.kind==='ragebolt';
     const fire = pr.kind==='firebolt';
-    const core = hot ? '#ff3a20' : rage ? '#d9b45a' : fire ? '#ff6a28' : '#ff8a3a';
-    const glow = hot ? '#ff3a20' : rage ? '#ffe08a' : fire ? '#ff9040' : '#ff8a3a';
-    const ring = hot ? 'rgba(255,170,82,0.55)' : rage ? 'rgba(255,230,150,0.48)' : fire ? 'rgba(255,140,60,0.52)' : 'rgba(255,220,150,0.48)';
+    const core = hot ? '#ff3a20' : holy ? '#ffe08a' : rage ? '#d9b45a' : fire ? '#ff6a28' : '#ff8a3a';
+    const glow = hot ? '#ff3a20' : holy ? '#fff8d0' : rage ? '#ffe08a' : fire ? '#ff9040' : '#ff8a3a';
+    const ring = hot ? 'rgba(255,170,82,0.55)' : holy ? 'rgba(255,240,180,0.58)' : rage ? 'rgba(255,230,150,0.48)' : fire ? 'rgba(255,140,60,0.52)' : 'rgba(255,220,150,0.48)';
     if(pr.trail){
       for(let i=0;i<pr.trail.length;i++){
         const tr=pr.trail[i], a=(i+1)/pr.trail.length*0.38;
-        ctx.fillStyle=hot?'rgba(255,70,32,'+a+')':rage?'rgba(217,180,90,'+a+')':fire?'rgba(255,110,40,'+a+')':'rgba(255,172,80,'+a+')';
+        ctx.fillStyle=hot?'rgba(255,70,32,'+a+')':holy?'rgba(255,224,138,'+a+')':rage?'rgba(217,180,90,'+a+')':fire?'rgba(255,110,40,'+a+')':'rgba(255,172,80,'+a+')';
         ctx.beginPath(); ctx.arc(tr.x,tr.y,pr.r*(0.5+(i+1)/pr.trail.length),0,6.28); ctx.fill();
       }
     }
-    ctx.save(); ctx.shadowColor=glow; ctx.shadowBlur=hot?24:rage?20:fire?18:16;
+    ctx.save(); ctx.shadowColor=glow; ctx.shadowBlur=hot?24:holy?22:rage?20:fire?18:16;
     const grd=ctx.createRadialGradient(pr.x,pr.y,0,pr.x,pr.y,pr.r+3);
-    grd.addColorStop(0,rage?'#fff8d0':'#fff0c0'); grd.addColorStop(0.5,core); grd.addColorStop(1,'#ff3a0000');
+    grd.addColorStop(0,holy?'#ffffff':rage?'#fff8d0':'#fff0c0'); grd.addColorStop(0.5,core); grd.addColorStop(1,'#ff3a0000');
     ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(pr.x,pr.y,pr.r+3,0,6.28); ctx.fill();
     ctx.strokeStyle=ring;
     ctx.beginPath(); ctx.arc(pr.x,pr.y,pr.r+7+Math.sin(pr.t*20)*2,0,6.28); ctx.stroke();
-    if(rage){ ctx.strokeStyle='rgba(255,230,150,0.35)'; ctx.beginPath(); ctx.moveTo(pr.x-pr.r*2,pr.y); ctx.lineTo(pr.x+pr.r*2,pr.y); ctx.stroke(); }
+    if(holy){
+      ctx.strokeStyle='rgba(255,248,220,0.45)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(pr.x-pr.r*2.2,pr.y); ctx.lineTo(pr.x+pr.r*2.2,pr.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pr.x,pr.y-pr.r*2.2); ctx.lineTo(pr.x,pr.y+pr.r*2.2); ctx.stroke();
+    } else if(rage){ ctx.strokeStyle='rgba(255,230,150,0.35)'; ctx.beginPath(); ctx.moveTo(pr.x-pr.r*2,pr.y); ctx.lineTo(pr.x+pr.r*2,pr.y); ctx.stroke(); }
     ctx.restore();
   }
 
@@ -3679,10 +3782,12 @@ function render(){
   for(const fl of game.floaters){ const a=1-fl.t/fl.life;
     ctx.globalAlpha=Math.max(0,a);
     if(fl.dmg){
-      const sz=Math.round(19*(fl.scale||1.35));
+      const sz=Math.round((fl.crit?22:19)*(fl.scale||1.35));
       ctx.font='bold '+sz+'px Trebuchet MS';
+      if(fl.crit){ ctx.shadowColor='#ffe040'; ctx.shadowBlur=8; }
       ctx.fillStyle='rgba(0,0,0,'+(a*0.6)+')'; ctx.fillText(fl.txt, fl.x+1.5, fl.y+2);
       ctx.fillStyle=fl.col; ctx.fillText(fl.txt, fl.x, fl.y);
+      ctx.shadowBlur=0;
     } else {
       ctx.fillStyle=fl.col;
       ctx.font=(typeof fl.txt==='string'&&fl.txt.length>3?'bold 15px':'bold 17px')+' Trebuchet MS';
@@ -4214,7 +4319,7 @@ function dropItem(sel){
   if(sel.source==='bag'){ it=p.bag.splice(sel.index,1)[0]; }
   else if(sel.source==='gear'){ it=p.gear[sel.slot]; p.gear[sel.slot]=null; recompute(p); }
   if(!it) return;
-  game.loot.push({x:p.x+rand(-18,18),y:p.y+rand(-18,18),it,bob:rand(0,6.28)});
+  pushLoot(p.x+rand(-18,18),p.y+rand(-18,18),{it});
   game.invSel=null;
   addFloat(p.x,p.y-30,'Dropped '+trim(it.name,16),'#b8b09a');
   audio.sfxPlay('uiBack');
@@ -4658,6 +4763,7 @@ canvas.addEventListener('mousedown', e=>{
   if(mobileMode && e.button===0 && handleMobileTap(pt.x,pt.y)) return;
   if(!game.attrOpen && !game.talentOpen && !game.invOpen && !game.stashOpen && e.button===0){
     if(handleHudClick(pt.x,pt.y)) return;
+    if(tryPickupLootClick(input.wx,input.wy)) return;
   }
   if(game.attrOpen && e.button===0){ handleAttributeClick(pt.x,pt.y); return; }
   if(game.talentOpen && e.button===0){ handleTalentClick(pt.x,pt.y); return; }
@@ -4736,9 +4842,9 @@ setInterval(()=>{
   if(!game||!running) return;
   const p=game.player;
   for(const l of game.loot){ if(l.it && !l.taken && dist(p.x,p.y,l.x,l.y)<26){
-    if(p.bag.length<24){ p.bag.push(l.it); l.taken=true; saveCurrent();
-      audio.sfxPlay('loot');
-      addFloat(p.x,p.y-30,l.it.name,l.it.rarity.col); } } }
+    if(game.t-(l.spawnT||0) < lootLingerTime(l.it)) continue;
+    if(p.bag.length<24) pickupItemLoot(l);
+  } }
 },80);
 
 preloadSprites();
