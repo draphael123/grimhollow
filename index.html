@@ -2,15 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Grimhollow — v0</title>
 <style>
   :root{ --gold:#d9b45a; --blood:#a02020; --ember:#ff7a24; --frost:#7fd8ff; }
   *{ margin:0; padding:0; box-sizing:border-box; }
   html,body{ height:100%; background:
     radial-gradient(circle at 50% 35%, #14111b 0%, #07070d 48%, #020308 100%);
-    overflow:hidden;
-    font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#e8e2d0; cursor:crosshair; }
+    overflow:hidden; touch-action:none; overscroll-behavior:none;
+    font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#e8e2d0; cursor:crosshair;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  body.mobile-mode{ cursor:default; }
+  body.mobile-mode #hint{ display:none; }
+  body.mobile-mode #overlay .keys{ display:none; }
+  body.mobile-mode #overlay .mobile-keys{ display:block; }
+  body.mobile-mode canvas{ touch-action:none; }
+  .mobile-keys{ display:none; color:#8a8470; font-size:13px; margin-top:14px; line-height:2; }
+  .mobile-keys b{ color:var(--gold); }
+  @media (max-width:860px){
+    .selectShell{ grid-template-columns:1fr; }
+    #overlay h1{ font-size:36px; letter-spacing:3px; }
+    #startBtn{ padding:14px 36px; font-size:16px; min-height:48px; }
+    .slotActions button{ min-height:44px; font-size:12px; }
+  }
   #wrap{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
   canvas{ display:block; background:#07080d; image-rendering:pixelated;
     box-shadow:0 0 80px #000 inset, 0 0 44px #000; }
@@ -52,6 +66,11 @@
   .mageStaff{ position:absolute; right:20px; top:38px; width:5px; height:150px; background:#8b6a36; transform:rotate(18deg); }
   .mageStaff:before{ content:""; position:absolute; left:-7px; top:-12px; width:19px; height:19px; border-radius:50%;
     background:#ffe0a0; box-shadow:0 0 24px #ff8a3a; }
+  .paladinFigure:before{ background:#2a2838; box-shadow:0 0 34px rgba(217,180,90,.35); }
+  .paladinFigure:after{ clip-path:polygon(18% 0,82% 0,100% 100%,0 100%);
+    background:linear-gradient(90deg,#4a5058,#7a8490,#3a4048); border-bottom:4px solid rgba(217,180,90,.65); }
+  .paladinSword{ right:28px; top:52px; height:118px; width:4px; background:#9a8a68; transform:rotate(8deg); }
+  .paladinSword:before{ background:#d9b45a; box-shadow:0 0 24px #d9b45a; left:-5px; top:-8px; width:14px; height:14px; border-radius:2px; }
   .classGrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
   .lockedClass{ padding:12px 8px; color:#5f5a4f; font-size:12px; text-transform:uppercase; letter-spacing:1px; }
   .slots{ display:flex; flex-direction:column; gap:10px; }
@@ -68,33 +87,43 @@
 <body>
 <div id="wrap"><canvas id="c"></canvas></div>
 <div id="hint">
-  <b>Left-click</b> move/target · <b>1</b> Rage Bolt · unlock skills with <b>T</b> talents · <b>Q/E</b> potions · enter the crypt from the forest
+  <b>Left-click</b> move/target · <b>1</b> Smite · unlock skills with <b>T</b> talents · <b>Q/E</b> potions · talk to NPCs · enter the crypt from the deep woods
 </div>
 <div id="overlay">
   <h1>GRIMHOLLOW</h1>
-  <p>A sorceress waits at the last fire before the sunless crypt. Step through the grave gate, break the dead, take what drops, and dive deeper.</p>
+  <p>A paladin awakens in peaceful Grimhollow hamlet. Hear the elders, cross the wood, and descend the sunless crypt when the dead grow restless.</p>
   <div class="keys">
-    <b>Left-click</b> — move, or hold on a foe to cast Rage Bolt<br>
-    <b>1</b> Rage Bolt · other skill slots unlock through the talent tree<br>
-    <b>Q</b> health potion · <b>E</b> mana potion<br>
+    <b>Left-click</b> — move, talk to NPCs, or hold on a foe to cast Smite<br>
+    <b>1</b> Smite · other skill slots unlock through the talent tree<br>
+    <b>Q</b> health potion · <b>E</b> mana potion (talk to NPCs when nearby)<br>
     <b>Spacebar</b> — dodge roll toward cursor (costs stamina)<br>
-    <b>I</b> — inventory &amp; gear · click a bag item to equip
+    <b>I</b> — inventory &amp; gear · town stash stores spare loot
   </div>
-  <button id="startBtn">Wake at Camp</button>
+  <button id="startBtn">Enter Grimhollow</button>
 </div>
 <script>
 "use strict";
 // ============================================================================
-//  GRIMHOLLOW v0 — D2-style caster ARPG. Single file. Working title.
+//  GRIMHOLLOW v0 — D2-style holy warrior ARPG. Single file. Working title.
 // ============================================================================
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const TILE = 40;                 // world units per tile
 let VIEW_W = 960, VIEW_H = 600;  // canvas pixel size (set on resize)
 
+let mobileMode = false;
+function detectMobile(){
+  mobileMode = ('ontouchstart' in window) || navigator.maxTouchPoints>0 || window.innerWidth<860;
+  document.body.classList.toggle('mobile-mode', mobileMode);
+  const hint=document.getElementById('hint');
+  if(hint && mobileMode){
+    hint.innerHTML='<b>Joystick</b> move · <b>Smite</b> attack · <b>Dodge</b> roll · tap skills &amp; potions · <b>Talk</b> near NPCs';
+  }
+}
 function resize(){
-  VIEW_W = Math.min(window.innerWidth,  1200);
-  VIEW_H = Math.min(window.innerHeight, 760);
+  detectMobile();
+  VIEW_W = Math.min(window.innerWidth,  mobileMode?window.innerWidth:1200);
+  VIEW_H = Math.min(window.innerHeight, mobileMode?window.innerHeight:760);
   canvas.width = VIEW_W; canvas.height = VIEW_H;
 }
 window.addEventListener('resize', resize); resize();
@@ -141,14 +170,17 @@ function dmgElementCol(kind){
 let game = null;      // holds the whole run
 let running = false;
 let lastT = 0;
-const SAVE_PREFIX = 'grimhollow.mage.slot.';
+const SAVE_PREFIX = 'grimhollow.paladin.slot.';
+const STASH_SIZE = 24;
 
 const input = {
   mx:0, my:0,          // mouse screen pos
   wx:0, wy:0,          // mouse world pos
-  left:false, right:false,
+  left:false, right:false, attack:false,
   keys:{},
+  joy:{active:false, cx:0, cy:0, dx:0, dy:0, tid:null},
 };
+let mobileHit=[];
 
 // ============================================================================
 //  AUDIO — real CC0 assets with procedural fallback cues
@@ -426,47 +458,152 @@ function genDungeon(depth){
     solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1 };
 }
 
-function genCamp(){
-  const W = 34, H = 24;
+function normalizeScene(s){
+  if(!s || s==='camp' || s==='forest') return 'forest1';
+  return s;
+}
+function sceneIsTown(){ return game?.scene==='town'; }
+function sceneIsForest(){
+  const s=game?.scene;
+  return s==='forest1'||s==='forest2'||s==='forest3'||s==='forest'||s==='camp';
+}
+function sceneIsOverworld(){ return sceneIsTown()||sceneIsForest(); }
+function sceneIsForestStage(n){ return game?.scene==='forest'+n; }
+function sceneLabel(){
+  if(!game) return '';
+  if(game.scene==='town') return 'Grimhollow Hamlet';
+  if(game.scene==='forest1') return 'Grimhollow Wood';
+  if(game.scene==='forest2') return 'Deep Woods';
+  if(game.scene==='forest3') return 'Crypt Approach';
+  if(game.scene==='dungeon') return 'Depth '+game.depth;
+  return game.scene;
+}
+function forestTone(){
+  if(game?.scene==='forest3') return 'mist';
+  if(game?.scene==='forest2') return 'dusk';
+  if(game?.scene==='forest1') return 'bright';
+  return game?.dungeon?.tone||'bright';
+}
+
+function genTown(){
+  const W=36, H=26;
+  const grid = new Array(W*H).fill(1);
+  const idx = (x,y)=> y*W+x;
+  for(let y=4;y<H-3;y++) for(let x=4;x<W-4;x++) grid[idx(x,y)] = 0;
+  for(let y=5;y<11;y++) for(let x=6;x<12;x++) grid[idx(x,y)] = 1;
+  for(let y=5;y<12;y++) for(let x=24;x<30;x++) grid[idx(x,y)] = 1;
+  for(let y=16;y<20;y++) for(let x=26;x<31;x++) grid[idx(x,y)] = 1;
+  for(let x=28;x<W-2;x++) for(let y=11;y<15;y++) grid[idx(x,y)] = 0;
+  return {
+    W,H,grid,
+    rooms:[{x:4,y:4,w:W-8,h:H-7,cx:18,cy:14}],
+    spawn:{x:18.5*TILE,y:18.2*TILE},
+    stash:{x:28.5*TILE,y:17.5*TILE,r:36},
+    exit:{x:33.2*TILE,y:13*TILE,r:42,label:'Grimhollow Wood',target:'forest1'},
+    graveyard:{x:18.5*TILE,y:19.5*TILE},
+    tone:'warm',
+    npcs:[
+      {id:'seer',x:14.5*TILE,y:14*TILE,r:28,name:'Elder Morven',lines:[
+        'The hamlet has slept easy for years…',
+        'But evil stirs beneath the old crypt.',
+        'Steel your faith before you enter Grimhollow Wood.'
+      ]},
+      {id:'guard',x:22*TILE,y:15*TILE,r:28,name:'Watchman Holt',lines:[
+        'The forest path lies east, past the signpost.',
+        'Travelers whisper of restless dead near the crypt gate.',
+        'Better you than me, paladin.'
+      ]},
+      {id:'keeper',x:27.5*TILE,y:16.8*TILE,r:30,name:'Stash Keeper Ida',lines:[
+        'Town stash is free for all who march against the dark.',
+        'Click the chest or press E near me to store spare gear.',
+        'What you deposit stays safe if the woods claim you.'
+      ]}
+    ],
+    props:[
+      {kind:'inn',x:9*TILE,y:9*TILE},
+      {kind:'chapel',x:27*TILE,y:10*TILE},
+      {kind:'sign',x:31*TILE,y:13*TILE,label:'WOOD'},
+      {kind:'barrel',x:12.5*TILE,y:17*TILE},
+      {kind:'barrel',x:15*TILE,y:18.5*TILE},
+      {kind:'well',x:21*TILE,y:19*TILE}
+    ],
+    solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1
+  };
+}
+
+function genForestStage(stage){
+  const W=34, H=24;
   const grid = new Array(W*H).fill(1);
   const idx = (x,y)=> y*W+x;
   for(let y=3;y<H-2;y++) for(let x=3;x<W-3;x++) grid[idx(x,y)] = 0;
-  for(let y=5;y<9;y++) for(let x=5;x<8;x++) grid[idx(x,y)] = 1;
-  for(let y=14;y<19;y++) for(let x=26;x<30;x++) grid[idx(x,y)] = 1;
-  for(let y=2;y<7;y++) for(let x=15;x<20;x++) grid[idx(x,y)] = 0;
-  const camp = {
-    W,H,grid,
-    rooms:[{x:3,y:3,w:W-6,h:H-5,cx:17,cy:18}],
-    entrance:{ x:17.5*TILE, y:3.7*TILE, r:34 },
-    fire:{ x:9.5*TILE, y:17*TILE },
-    stash:{ x:24.5*TILE, y:16.5*TILE },
-    path:[
-      {x:17.5*TILE,y:20*TILE,r:86},
-      {x:15.5*TILE,y:16.4*TILE,r:74},
-      {x:13.2*TILE,y:12.5*TILE,r:64},
-      {x:15.5*TILE,y:8.6*TILE,r:62},
-      {x:17.5*TILE,y:4.7*TILE,r:80}
-    ],
-    props:[
-      {kind:'grave',x:6.5*TILE,y:8.5*TILE},
-      {kind:'tree',x:7.4*TILE,y:6.3*TILE},
-      {kind:'tree',x:5.5*TILE,y:15.2*TILE},
-      {kind:'tree',x:12.2*TILE,y:5.2*TILE},
-      {kind:'tree',x:22.8*TILE,y:6.4*TILE},
-      {kind:'tree',x:27.5*TILE,y:15.5*TILE},
-      {kind:'tree',x:29.2*TILE,y:18.4*TILE},
-      {kind:'stump',x:12.1*TILE,y:16.2*TILE},
-      {kind:'sign',x:14.2*TILE,y:18.4*TILE},
-      {kind:'standingStone',x:20.8*TILE,y:8.7*TILE},
-      {kind:'standingStone',x:13.7*TILE,y:7.9*TILE},
-      {kind:'wagon',x:25.5*TILE,y:19*TILE},
-      {kind:'candles',x:14.7*TILE,y:5.6*TILE},
-      {kind:'candles',x:20.3*TILE,y:5.7*TILE}
-    ],
-    graveyard:{ x:17.5*TILE, y:19.2*TILE },
+  if(stage===1){
+    for(let y=14;y<19;y++) for(let x=5;x<9;x++) grid[idx(x,y)] = 1;
+    for(let y=5;y<9;y++) for(let x=26;x<30;x++) grid[idx(x,y)] = 1;
+  } else if(stage===2){
+    for(let y=6;y<10;y++) for(let x=8;x<12;x++) grid[idx(x,y)] = 1;
+  } else {
+    for(let y=2;y<7;y++) for(let x=15;x<20;x++) grid[idx(x,y)] = 0;
+    for(let y=5;y<9;y++) for(let x=5;x<8;x++) grid[idx(x,y)] = 1;
+  }
+  const configs={
+    1:{
+      spawn:{x:4.8*TILE,y:12*TILE},
+      exit:{x:30.5*TILE,y:12*TILE,r:40,target:'forest2'},
+      path:[
+        {x:5.5*TILE,y:12*TILE,r:70},{x:12*TILE,y:11.5*TILE,r:68},
+        {x:20*TILE,y:12.5*TILE,r:72},{x:27*TILE,y:12*TILE,r:80}
+      ],
+      props:[
+        {kind:'stump',x:8.5*TILE,y:15.5*TILE},{kind:'stump',x:11.2*TILE,y:14.2*TILE},
+        {kind:'wagon',x:7.5*TILE,y:17*TILE},{kind:'sign',x:10.5*TILE,y:10.5*TILE,label:'CAMP'},
+        {kind:'tree',x:5.5*TILE,y:8.2*TILE},{kind:'tree',x:12.2*TILE,y:5.2*TILE},
+        {kind:'tree',x:22.8*TILE,y:6.4*TILE},{kind:'tree',x:27.5*TILE,y:15.5*TILE},
+        {kind:'tree',x:29.2*TILE,y:18.4*TILE},{kind:'barrel',x:7.2*TILE,y:14.8*TILE}
+      ],
+      tone:'bright',
+      graveyard:{x:4.8*TILE,y:12*TILE}
+    },
+    2:{
+      spawn:{x:4.8*TILE,y:12*TILE},
+      exit:{x:30*TILE,y:11*TILE,r:42,target:'forest3'},
+      path:[
+        {x:6*TILE,y:12*TILE,r:68},{x:14*TILE,y:10.5*TILE,r:66},
+        {x:22*TILE,y:11.8*TILE,r:70},{x:28.5*TILE,y:11*TILE,r:78}
+      ],
+      props:[
+        {kind:'tree',x:7.4*TILE,y:6.3*TILE},{kind:'tree',x:5.5*TILE,y:15.2*TILE},
+        {kind:'tree',x:18.2*TILE,y:5.2*TILE},{kind:'tree',x:25.8*TILE,y:16.4*TILE},
+        {kind:'stump',x:16.1*TILE,y:16.2*TILE},{kind:'standingStone',x:20.8*TILE,y:8.7*TILE},
+        {kind:'sign',x:18.2*TILE,y:15.4*TILE,label:'DEEP'}
+      ],
+      tone:'dusk'
+    },
+    3:{
+      spawn:{x:17.5*TILE,y:20*TILE},
+      entrance:{x:17.5*TILE,y:3.7*TILE,r:34},
+      path:[
+        {x:17.5*TILE,y:20*TILE,r:86},{x:15.5*TILE,y:16.4*TILE,r:74},
+        {x:13.2*TILE,y:12.5*TILE,r:64},{x:15.5*TILE,y:8.6*TILE,r:62},
+        {x:17.5*TILE,y:4.7*TILE,r:80}
+      ],
+      props:[
+        {kind:'grave',x:6.5*TILE,y:8.5*TILE},{kind:'tree',x:7.4*TILE,y:6.3*TILE},
+        {kind:'tree',x:12.2*TILE,y:5.2*TILE},{kind:'tree',x:22.8*TILE,y:6.4*TILE},
+        {kind:'standingStone',x:13.7*TILE,y:7.9*TILE},
+        {kind:'candles',x:14.7*TILE,y:5.6*TILE},{kind:'candles',x:20.3*TILE,y:5.7*TILE},
+        {kind:'sign',x:14.2*TILE,y:18.4*TILE,label:'GATE'}
+      ],
+      tone:'mist',
+      graveyard:{x:17.5*TILE,y:19.2*TILE}
+    }
+  };
+  const cfg=configs[stage]||configs[1];
+  return {
+    W,H,grid,stage,
+    rooms:[{x:3,y:3,w:W-6,h:H-5,cx:17,cy:stage===3?18:12}],
+    ...cfg,
     solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1
   };
-  return camp;
 }
 
 // world-point walkability (circle vs grid)
@@ -508,7 +645,7 @@ const SPECIAL_AFFIXES = [
 ];
 const SLOTS = ['weapon','offhand','helm','armor','gloves','boots','belt','amulet','ring1','ring2'];
 const ITEM_TYPES = ['weapon','offhand','helm','armor','gloves','boots','belt','amulet','ring'];
-const SLOT_NAMES = { weapon:'Staff', offhand:'Focus', helm:'Helm', armor:'Robe', gloves:'Gloves', boots:'Boots', belt:'Belt', amulet:'Amulet', ring:'Ring', ring1:'Ring I', ring2:'Ring II' };
+const SLOT_NAMES = { weapon:'Sword', offhand:'Shield', helm:'Helm', armor:'Plate', gloves:'Gloves', boots:'Boots', belt:'Belt', amulet:'Amulet', ring:'Ring', ring1:'Ring I', ring2:'Ring II' };
 const RARITIES = [
   {k:'common', name:'',          col:'#d8d4c4', n:0, w:50},
   {k:'magic',  name:'Enchanted', col:'#6aa8ff', n:1, w:32},
@@ -565,7 +702,7 @@ const TALENTS = [
 ];
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map(t=>[t.id,t]));
 const ABILITIES = {
-  rage:{slot:1,label:'Rage',name:'Rage Bolt',unlock:null,cd:'castCd',max:p=>0.34/p.castMul,col:'#d9b45a',mana:0},
+  rage:{slot:1,label:'Smite',name:'Smite',unlock:null,cd:'castCd',max:p=>0.34/p.castMul,col:'#d9b45a',mana:0},
   firebolt:{slot:2,label:'Fire',name:'Firebolt',unlock:'ember',cd:'castCd',max:p=>0.22/p.castMul,col:'#ff8a3a',mana:4},
   nova:{slot:3,label:'Nova',name:'Frost Nova',unlock:'frost',cd:'novaCd',max:p=>0.82/p.castMul,col:'#5a9aff',mana:18},
   lightning:{slot:4,label:'Arc',name:'Lightning Arc',unlock:'storm',cd:'lightCd',max:p=>0.58/p.castMul,col:'#ffe06a',mana:10},
@@ -628,8 +765,14 @@ function rollItem(depth){
 // ============================================================================
 //  PLAYER
 // ============================================================================
+function givePaladinStarterGear(p){
+  p.gear.weapon={slot:'weapon',rarity:RARITIES[0],name:'Training Sword',affixes:[{k:'spell',label:'% Spell Damage',v:8,suffix:'%'}],ilvl:0,score:24};
+  p.gear.offhand={slot:'offhand',rarity:RARITIES[0],name:'Faith Shield',affixes:[{k:'life',label:'Max Life',v:12}],ilvl:0,score:12};
+  recompute(p);
+}
 function newPlayer(){
   return {
+    class:'Paladin',
     x:0,y:0, r:13, speed:170, dir:0, facing:1,
     animState:'idle', animFrame:0, animTimer:0,
     level:1, xp:0, xpNext:20,
@@ -721,7 +864,7 @@ function rollMonsterEliteAffixes(){
   return out;
 }
 function eliteSpawnChance(){
-  if(!game || game.scene==='forest' || game.scene==='camp') return 0;
+  if(!game || sceneIsOverworld()) return 0;
   return clamp(0.08+game.depth*0.008,0.08,0.12);
 }
 function applyEliteToMonster(m){
@@ -831,10 +974,13 @@ function saveCurrent(){
   if(!game||!game.saveSlot||!game.player) return;
   const p=game.player;
   const data={
-    class:'Mage',
+    class:'Paladin',
+    scene:game.scene,
+    depth:game.depth||0,
     updatedAt:Date.now(),
     bestDepth:Math.max(game.bestDepth||0,game.depth||0),
     quest:game.quest||{status:'active'},
+    stash:game.stash||[],
     player:{
       level:p.level, xp:p.xp, xpNext:p.xpNext,
       attrPoints:p.attrPoints, attrs:p.attrs,
@@ -848,9 +994,10 @@ function saveCurrent(){
 }
 function slotSummary(slot){
   const d=loadSlot(slot);
-  if(!d) return {empty:true,title:'Empty Slot',meta:'Create a Mage',detail:'No hero has entered the crypt.'};
+  if(!d) return {empty:true,title:'Empty Slot',meta:'Create a Paladin',detail:'No hero has entered the crypt.'};
   const date=new Date(d.updatedAt||Date.now()).toLocaleDateString();
-  return {empty:false,title:'Mage',meta:'Level '+(d.player?.level||1)+'  |  Best Depth '+(d.bestDepth||0),detail:(d.quest?.status==='complete'?'Quest complete':'Quest active')+'  |  Saved '+date};
+  const where=d.scene==='town'?'Hamlet':d.scene?.startsWith('forest')?'Woods':d.scene==='dungeon'?'Depth '+(d.depth||1):d.scene||'Hamlet';
+  return {empty:false,title:'Paladin',meta:'Level '+(d.player?.level||1)+'  |  '+where+'  |  Best Depth '+(d.bestDepth||0),detail:(d.quest?.status==='complete'?'Quest complete':'Quest active')+'  |  Saved '+date};
 }
 function showCharacterSelect(){
   running=false;
@@ -864,10 +1011,10 @@ function showCharacterSelect(){
       (s.empty?'':'<button class="delete" data-delete="'+slot+'">Delete</button>')+
       '</div></div>';
   }).join('');
-  ov.innerHTML='<h1>GRIMHOLLOW</h1><p class="sub">Choose your hero. Only the Mage answers the call for now.</p>'+
-    '<div class="selectShell"><div class="charCard"><h2 style="color:var(--gold);letter-spacing:3px;">MAGE</h2>'+
-    '<div class="mageFigure"><div class="mageStaff"></div></div><p>A hooded caster who begins with Rage Bolt and unlocks fire, frost, lightning, and ward magic through talents.</p>'+
-    '<div class="classGrid"><div class="lockedClass">Knight<br>Locked</div><div class="lockedClass">Ranger<br>Locked</div><div class="lockedClass">Necromancer<br>Locked</div></div></div>'+
+  ov.innerHTML='<h1>GRIMHOLLOW</h1><p class="sub">Choose your hero. Only the Paladin answers the call for now.</p>'+
+    '<div class="selectShell"><div class="charCard"><h2 style="color:var(--gold);letter-spacing:3px;">PALADIN</h2>'+
+    '<div class="mageFigure paladinFigure"><div class="mageStaff paladinSword"></div></div><p>A plate-clad holy warrior who begins with Smite and unlocks fire, frost, lightning, and ward magic through talents.</p>'+
+    '<div class="classGrid"><div class="lockedClass">Mage<br>Locked</div><div class="lockedClass">Ranger<br>Locked</div><div class="lockedClass">Necromancer<br>Locked</div></div></div>'+
     '<div class="slots">'+slots+'</div></div>';
   ov.onclick=e=>{
     const del=e.target.getAttribute('data-delete');
@@ -884,43 +1031,107 @@ function startRun(slot=1){
   audio.sfxPlay('ui');
   const p = newPlayer();
   const saved=loadSlot(slot);
+  const isNew=!saved?.player;
   applySave(p,saved);
+  if(isNew) givePaladinStarterGear(p);
   recompute(p);
   if(saved?.player){
     p.life=clamp(saved.player.life||p.maxLife,1,p.maxLife);
     p.mana=clamp(saved.player.mana||p.maxMana,0,p.maxMana);
   }
-  game = { scene:'forest', depth:0, player:p, monsters:[], projectiles:[], fx:[], loot:[], floaters:[], toasts:[],
-           shake:0, dungeon:null, cleared:false, portal:null, invOpen:false, invSel:null, talentOpen:false, talentSel:'ember', attrOpen:false,
-           saveSlot:slot, bestDepth:saved?.bestDepth||0, quest:saved?.quest||{id:'grave-brute',status:'active'}, bossSpawned:false, arena:null, hitStop:0, t:0, killGoal:0 };
-  buildCamp();
+  game = { scene:'town', depth:saved?.depth||0, player:p, monsters:[], projectiles:[], fx:[], loot:[], floaters:[], toasts:[],
+           shake:0, dungeon:null, cleared:false, portal:null, invOpen:false, invSel:null, stashOpen:false, stashSel:null,
+           talentOpen:false, talentSel:'ember', attrOpen:false, npcDialog:null,
+           saveSlot:slot, bestDepth:saved?.bestDepth||0, quest:saved?.quest||{id:'grave-brute',status:'active'},
+           stash:saved?.stash||[], bossSpawned:false, arena:null, hitStop:0, t:0, killGoal:0 };
+  if(saved?.scene && saved.scene!=='town'){
+    restoreScene(normalizeScene(saved.scene), saved.depth||0);
+  } else {
+    buildTown(isNew);
+  }
   running = true; lastT = now();
   document.getElementById('overlay').style.display = 'none';
   saveCurrent();
   requestAnimationFrame(loop);
 }
-function buildCamp(){
-  const d = genCamp();
-  game.scene = 'forest';
+function resetOverworldRuntime(){
+  game.monsters=[]; game.projectiles=[]; game.fx=[]; game.loot=[]; game.floaters=[];
+  game.cleared=false; game.portal=null; game.killGoal=0; game.arena=null; game.gateWarn=0;
+  game.player.moveTx=null; game.player.moveTy=null;
+}
+function buildTown(isNew=true){
+  const d = genTown();
+  game.scene = 'town';
   game.depth = 0;
   game.dungeon = d;
-  game.player.x = 17.5*TILE;
-  game.player.y = 19.2*TILE;
-  game.player.moveTx=null; game.player.moveTy=null;
-  game.monsters=[]; game.projectiles=[]; game.fx=[]; game.loot=[]; game.floaters=[];
-  game.cleared=false; game.portal=null; game.killGoal=0; game.arena=null;
-  game.gateWarn=0;
-  for(const spot of [{x:10.5*TILE,y:11.5*TILE},{x:24*TILE,y:10*TILE}]){
-    const m=spawnMonster('zombie',spot.x,spot.y,0);
+  game.player.x = d.spawn.x;
+  game.player.y = d.spawn.y;
+  resetOverworldRuntime();
+  audio.setMusic('camp');
+  if(isNew){
+    addFloat(game.player.x, game.player.y-30, 'GRIMHOLLOW HAMLET', '#d9b45a');
+    addFloat(game.player.x, game.player.y-52, 'Talk to villagers · stash gear · east to the wood', '#7ac83a');
+  }
+}
+function spawnForestEnemies(stage){
+  if(stage===2){
+    const m=spawnMonster('zombie',10.5*TILE,11.5*TILE,0);
     m.name='Lost Dead'; m.hp=24; m.maxhp=24; m.dmg=5; m.speed=52; m.xp=8; m.col='#789a68'; m.tutorial=true;
     game.monsters.push(m);
+    if(chance(0.55)){
+      const m2=spawnMonster('zombie',24*TILE,10*TILE,0);
+      m2.name='Lost Dead'; m2.hp=22; m2.maxhp=22; m2.dmg=5; m2.speed=50; m2.xp=8; m2.col='#789a68'; m2.tutorial=true;
+      game.monsters.push(m2);
+    }
+  } else if(stage===3){
+    for(const spot of [{x:10.5*TILE,y:11.5*TILE},{x:24*TILE,y:10*TILE}]){
+      const m=spawnMonster('zombie',spot.x,spot.y,0);
+      m.name='Lost Dead'; m.hp=24; m.maxhp=24; m.dmg=5; m.speed=52; m.xp=8; m.col='#789a68'; m.tutorial=true;
+      game.monsters.push(m);
+    }
+    game.loot.push({x:14.2*TILE,y:17.2*TILE,orb:'lifePotion',bob:rand(0,6.28)});
+    game.loot.push({x:20.5*TILE,y:14.6*TILE,orb:'manaPotion',bob:rand(0,6.28)});
   }
-  game.loot.push({x:14.2*TILE,y:17.2*TILE,orb:'lifePotion',bob:rand(0,6.28)});
-  game.loot.push({x:20.5*TILE,y:14.6*TILE,orb:'manaPotion',bob:rand(0,6.28)});
   game.killGoal=game.monsters.length;
+}
+function buildForestStage(stage, isNew=false){
+  const d = genForestStage(stage);
+  game.scene = 'forest'+stage;
+  game.depth = 0;
+  game.dungeon = d;
+  game.player.x = d.spawn.x;
+  game.player.y = d.spawn.y;
+  resetOverworldRuntime();
+  spawnForestEnemies(stage);
   audio.setMusic('camp');
-  addFloat(game.player.x, game.player.y-30, 'FOREST OUTSKIRTS', '#7ac83a');
-  addFloat(game.player.x, game.player.y-52, 'Use Rage Bolt, then enter the crypt', '#d9b45a');
+  const labels={1:'GRIMHOLLOW WOOD',2:'DEEP WOODS',3:'CRYPT APPROACH'};
+  if(isNew) addFloat(game.player.x, game.player.y-30, labels[stage]||'FOREST', stage===1?'#7ac83a':'#d9b45a');
+  if(stage===1 && isNew) addFloat(game.player.x, game.player.y-52, 'Follow the path east · no foes here yet', '#8a8470');
+  if(stage===2 && isNew) addFloat(game.player.x, game.player.y-52, 'Lost Dead ahead — hold click to Smite', '#d9b45a');
+  if(stage===3 && isNew) addFloat(game.player.x, game.player.y-52, 'Clear the dead, then enter the crypt gate', '#d9b45a');
+}
+function restoreScene(scene, depth){
+  scene = normalizeScene(scene);
+  if(scene==='dungeon' && depth>=1){
+    game.depth = depth;
+    buildFloor();
+    return;
+  }
+  if(scene.startsWith('forest')){
+    buildForestStage(parseInt(scene.replace('forest',''))||1);
+    return;
+  }
+  buildTown(false);
+}
+function enterForestStage(target){
+  const stage=parseInt(String(target).replace('forest',''))||1;
+  audio.sfxPlay('ui');
+  buildForestStage(stage, true);
+  saveCurrent();
+}
+function nearWorldExit(p,d){
+  if(!d?.exit) return false;
+  return dist(p.x,p.y,d.exit.x,d.exit.y)<d.exit.r;
 }
 function buildFloor(){
   game.scene = 'dungeon';
@@ -974,17 +1185,130 @@ function buildFloor(){
 }
 
 function enterCrypt(){
-  if(game.scene!=='forest' && game.scene!=='camp') return;
+  if(game.scene!=='forest3') return;
   audio.sfxPlay('ui');
   game.depth = 1;
   buildFloor();
   addFloat(game.player.x, game.player.y-30, 'DEPTH 1', '#b06aff');
 }
 
+// ---- NPCs, stash, dialogue ---------------------------------------------------
+function npcAt(wx,wy){
+  const d=game?.dungeon;
+  if(!d?.npcs) return null;
+  for(const n of d.npcs){
+    if(dist(wx,wy,n.x,n.y)<n.r+10) return n;
+  }
+  return null;
+}
+function npcNearPlayer(p){
+  const d=game?.dungeon;
+  if(!d?.npcs) return null;
+  for(const n of d.npcs){ if(dist(p.x,p.y,n.x,n.y)<n.r+18) return n; }
+  return null;
+}
+function stashNearPlayer(p){
+  const s=game?.dungeon?.stash;
+  if(!s) return false;
+  return dist(p.x,p.y,s.x,s.y)<(s.r||34);
+}
+function openNpcDialogue(npc){
+  if(!npc) return;
+  game.npcDialog={npc,line:0,lines:npc.lines.slice()};
+  game.invOpen=false; game.stashOpen=false; game.talentOpen=false; game.attrOpen=false;
+  audio.sfxPlay('ui');
+}
+function advanceNpcDialogue(){
+  const dlg=game.npcDialog;
+  if(!dlg) return;
+  dlg.line++;
+  if(dlg.line>=dlg.lines.length){ game.npcDialog=null; audio.sfxPlay('uiBack'); }
+  else audio.sfxPlay('ui');
+}
+function tryWorldInteract(p){
+  if(p.dying||p.dead||game.invOpen||game.talentOpen||game.attrOpen||game.stashOpen) return false;
+  if(game.npcDialog){ advanceNpcDialogue(); return true; }
+  const clickNpc=npcAt(input.wx,input.wy);
+  if(clickNpc && dist(p.x,p.y,clickNpc.x,clickNpc.y)<clickNpc.r+36){ openNpcDialogue(clickNpc); return true; }
+  const near=npcNearPlayer(p);
+  if(near){ openNpcDialogue(near); return true; }
+  if(sceneIsTown() && stashNearPlayer(p)){ game.stashOpen=true; game.invOpen=false; audio.sfxPlay('ui'); return true; }
+  return false;
+}
+function toggleStash(open){
+  if(open==null) open=!game.stashOpen;
+  game.stashOpen=open;
+  if(open){ game.invOpen=false; game.talentOpen=false; game.attrOpen=false; game.npcDialog=null; }
+}
+let stashHit=[];
+function depositToStash(index){
+  const p=game.player;
+  if(index<0||!p.bag[index]||game.stash.length>=STASH_SIZE) return;
+  game.stash.push(p.bag.splice(index,1)[0]);
+  saveCurrent(); audio.sfxPlay('ui');
+}
+function withdrawFromStash(index){
+  const p=game.player;
+  if(index<0||!game.stash[index]||p.bag.length>=24) return;
+  p.bag.push(game.stash.splice(index,1)[0]);
+  saveCurrent(); audio.sfxPlay('ui');
+}
+function drawStashPanel(){
+  const p=game.player;
+  stashHit=[];
+  const W=Math.min(720,VIEW_W-24), H=Math.min(420,VIEW_H-80), x=(VIEW_W-W)/2, y=(VIEW_H-H)/2;
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.fillStyle='rgba(8,9,14,0.98)'; ctx.fillRect(x,y,W,H);
+  drawGothicFrame(x,y,W,H,'rgba(217,180,90,0.55)');
+  ctx.fillStyle='#d9b45a'; ctx.font='bold 20px Trebuchet MS'; ctx.textAlign='left';
+  ctx.fillText('TOWN STASH', x+18, y+28);
+  ctx.fillStyle='#8a8470'; ctx.font='11px Trebuchet MS';
+  ctx.fillText('Tap bag to store · tap stash to withdraw', x+148, y+28);
+  const bagX=x+20, bagY=y+52, stashX=x+W/2+10, stashY=y+52, cell=54, gap=6, cols=4;
+  drawPanelTitle(bagX, bagY-16, 'Backpack');
+  for(let i=0;i<12;i++){
+    const col=i%cols, row=Math.floor(i/cols);
+    const bx=bagX+col*(cell+gap), by=bagY+row*(cell+gap);
+    drawBagCell(bx,by,cell,p.bag[i],i,false);
+    if(p.bag[i]) stashHit.push({x:bx,y:by,w:cell,h:cell,type:'deposit',index:i});
+  }
+  drawPanelTitle(stashX, stashY-16, 'Stash '+game.stash.length+' / '+STASH_SIZE);
+  for(let i=0;i<12;i++){
+    const col=i%cols, row=Math.floor(i/cols);
+    const bx=stashX+col*(cell+gap), by=stashY+row*(cell+gap);
+    drawBagCell(bx,by,cell,game.stash[i],i,false);
+    if(game.stash[i]) stashHit.push({x:bx,y:by,w:cell,h:cell,type:'withdraw',index:i});
+  }
+  const closeX=x+W-90, closeY=y+H-44;
+  ctx.fillStyle='rgba(58,42,18,0.96)'; ctx.fillRect(closeX,closeY,72,32);
+  ctx.strokeStyle='#8a6426'; ctx.strokeRect(closeX+0.5,closeY+0.5,71,31);
+  ctx.fillStyle='#d9b45a'; ctx.font='bold 12px Trebuchet MS'; ctx.textAlign='center';
+  ctx.fillText('CLOSE', closeX+36, closeY+21);
+  stashHit.push({x:closeX,y:closeY,w:72,h:32,type:'close'});
+  ctx.restore();
+}
+function handleStashClick(mx,my){
+  for(let i=stashHit.length-1;i>=0;i--){
+    const h=stashHit[i];
+    if(mx<h.x||mx>h.x+h.w||my<h.y||my<h.y+h.h) continue;
+    if(h.type==='deposit'){ depositToStash(h.index); return true; }
+    if(h.type==='withdraw'){ withdrawFromStash(h.index); return true; }
+    if(h.type==='close'){ toggleStash(false); audio.sfxPlay('uiBack'); return true; }
+  }
+  return true;
+}
+function canWorldInteract(p){
+  if(game.npcDialog) return true;
+  if(npcNearPlayer(p)) return true;
+  if(sceneIsTown() && stashNearPlayer(p)) return true;
+  return false;
+}
+
 // ============================================================================
 //  CASTING
 // ============================================================================
-function combatScene(){ return game.scene==='forest' || game.scene==='dungeon'; }
+function combatScene(){ return game.scene==='forest2'||game.scene==='forest3'||game.scene==='dungeon'; }
 function tryRageBolt(p){
   if(p.castCd>0 || p.dodge>0 || !combatScene()) return;
   p.castCd = 0.34 / p.castMul;
@@ -1157,13 +1481,15 @@ function finalizeMonsterDeath(m){
   const p = game.player;
   p.xp += m.xp;
   while(p.xp >= p.xpNext){ levelUp(p); }
-  if(game.scene==='forest'){
+  if(game.scene==='forest2'||game.scene==='forest3'){
     const remaining=game.monsters.filter(x=>!x.dead && x!==m).length;
     if(remaining>0) addFloat(p.x,p.y-42,'Good. One more dead nearby.','#d9b45a');
-    else {
-      addFloat(p.x,p.y-42,'Tutorial complete: enter the crypt','#7ac83a');
+    else if(game.scene==='forest3'){
+      addFloat(p.x,p.y-42,'Path clear: enter the crypt gate','#7ac83a');
       refillPotion('life',true); refillPotion('mana',true);
       audio.sfxPlay('quest');
+    } else {
+      addFloat(p.x,p.y-42,'Continue deeper into the wood','#7ac83a');
     }
   }
   if(m.boss && game.quest?.status!=='complete'){
@@ -1222,7 +1548,7 @@ function damagePlayer(p, dmg){
 function footSurfaceAt(x,y){
   const d=game.dungeon;
   if(!d) return 'dungeon';
-  if(game.scene==='forest'||game.scene==='camp'){
+  if(sceneIsOverworld()){
     if(d.path && d.path.some(pt=>dist(x,y,pt.x,pt.y)<pt.r*0.68)) return 'dirt';
     return 'grass';
   }
@@ -1235,7 +1561,7 @@ function beginPlayerDeath(p){
   if(p.dying) return;
   p.dying=true; p.deathT=0; p.deathFrame=0; p.deathDur=0.54; p.life=0;
   p.moveTx=null; p.moveTy=null; p.dodge=0; p.castFlash=0;
-  input.left=false; input.right=false;
+  input.left=false; input.right=false; input.attack=false;
   game.deathFade=0; game.deathFadeIn=false; game.deathLossDone=false;
   game.deathLoc={x:p.x,y:p.y};
   audio.sfxPlay('death');
@@ -1243,7 +1569,7 @@ function beginPlayerDeath(p){
   spatter(p.x,p.y,'#601010',14);
 }
 function applyDeathInventoryLoss(p){
-  const forest=game.scene==='forest'||game.scene==='camp';
+  const forest=sceneIsForest();
   const bag=p.bag;
   if(!bag.length) return;
   const pct=forest?rand(0.10,0.18):rand(0.25,0.40);
@@ -1255,7 +1581,7 @@ function applyDeathInventoryLoss(p){
 }
 function respawnAtGraveyard(p){
   const d=game.dungeon;
-  const gy=d.graveyard||{x:(d.rooms[0].cx+0.5)*TILE,y:(d.rooms[0].cy+0.5)*TILE};
+  const gy=d.graveyard||d.spawn||{x:(d.rooms[0].cx+0.5)*TILE,y:(d.rooms[0].cy+0.5)*TILE};
   p.x=gy.x; p.y=gy.y;
   p.life=Math.ceil(p.maxLife*0.55); p.mana=Math.ceil(p.maxMana*0.45); p.stamina=p.maxStamina;
   p.dying=false; p.dead=false; p.deathT=0; p.deathFrame=0; p.hurt=0;
@@ -1263,6 +1589,8 @@ function respawnAtGraveyard(p){
   game.deathFadeIn=true;
   addToast('You awaken at the graveyard...','#a9a087',3.4);
   if(game.scene==='dungeon') addFloat(p.x,p.y-42,'GRAVEYARD OF ECHOES','#8a8490');
+  else if(sceneIsTown()) addFloat(p.x,p.y-42,'GRIMHOLLOW HAMLET','#d9b45a');
+  else if(sceneIsForestStage(1)) addFloat(p.x,p.y-42,'GRIMHOLLOW WOOD','#7ac83a');
   saveCurrent();
 }
 function updatePlayerDeath(dt){
@@ -1538,13 +1866,32 @@ function update(dt){
   if(game.attrOpen){ return; }
 
   // ---- input → action ----
-  // hovering a monster with LEFT held -> cast the starter Rage Bolt; else move to point
+  if(mobileMode && input.joy.active && !game.invOpen && !game.talentOpen && !game.stashOpen && !game.npcDialog){
+    const mag=Math.hypot(input.joy.dx,input.joy.dy);
+    if(mag>0.12){
+      const a=Math.atan2(input.joy.dy,input.joy.dx);
+      p.moveTx=p.x+Math.cos(a)*140;
+      p.moveTy=p.y+Math.sin(a)*140;
+      input.wx=p.x+Math.cos(a)*220;
+      input.wy=p.y+Math.sin(a)*220;
+    }
+  }
+  const atkHeld = input.left || input.attack;
+  if(mobileMode && atkHeld && combatScene()){
+    const aim=mobileAimPoint(p);
+    input.wx=aim.x; input.wy=aim.y;
+  }
   let hoverMon = null;
-  for(const m of game.monsters){ if(m.dead) continue;
-    if(dist(input.wx,input.wy,m.x,m.y) < m.r+8){ hoverMon=m; break; } }
+  if(combatScene()){
+    for(const m of game.monsters){ if(m.dead) continue;
+      if(dist(input.wx,input.wy,m.x,m.y) < m.r+8){ hoverMon=m; break; } }
+  }
 
-  if(input.left && !game.invOpen && !game.talentOpen){
-    if(hoverMon){ p.moveTx=null; tryRageBolt(p); }
+  if(atkHeld && !game.invOpen && !game.talentOpen && !game.stashOpen && !game.npcDialog){
+    const clickNpc=npcAt(input.wx,input.wy);
+    if(clickNpc && dist(p.x,p.y,clickNpc.x,clickNpc.y)<clickNpc.r+36){ openNpcDialogue(clickNpc); }
+    else if(sceneIsTown() && game.dungeon?.stash && dist(input.wx,input.wy,game.dungeon.stash.x,game.dungeon.stash.y)<40 && stashNearPlayer(p)){ toggleStash(true); audio.sfxPlay('ui'); }
+    else if(hoverMon){ p.moveTx=null; tryRageBolt(p); }
     else { p.moveTx = input.wx; p.moveTy = input.wy; }
   }
   if(input.right && !game.invOpen && !game.talentOpen){ useSkill(2); }
@@ -1576,8 +1923,8 @@ function update(dt){
   for(const t of p.trail) t.t+=dt;
   p.trail = p.trail.filter(t=>t.t<0.3);
 
-  if((game.scene==='forest' || game.scene==='camp') && dist(p.x,p.y,d.entrance.x,d.entrance.y)<d.entrance.r){
-    if(game.scene==='forest' && livingEnemyCount()>0){
+  if(game.scene==='forest3' && d.entrance && dist(p.x,p.y,d.entrance.x,d.entrance.y)<d.entrance.r){
+    if(livingEnemyCount()>0){
       if(!game.gateWarn || game.t-game.gateWarn>1.2){
         game.gateWarn=game.t;
         addFloat(p.x,p.y-42,'Clear the dead first','#d9b45a');
@@ -1586,6 +1933,10 @@ function update(dt){
       return;
     }
     enterCrypt();
+    return;
+  }
+  if(sceneIsOverworld() && d.exit && nearWorldExit(p,d)){
+    enterForestStage(d.exit.target);
     return;
   }
   } // end !p.dying player input
@@ -1691,9 +2042,21 @@ function doDodge(p){
 function drawBackgroundWash(camx,camy){
   const cx=camx+VIEW_W/2, cy=camy+VIEW_H/2;
   const base=ctx.createRadialGradient(cx,cy,60,cx,cy,Math.max(VIEW_W,VIEW_H)*0.78);
-  if(game.scene==='forest' || game.scene==='camp'){
-    base.addColorStop(0,'rgba(24,42,26,0.32)');
-    base.addColorStop(1,'rgba(2,7,4,0.70)');
+  if(sceneIsTown()){
+    base.addColorStop(0,'rgba(58,48,32,0.28)');
+    base.addColorStop(1,'rgba(18,14,8,0.55)');
+  } else if(sceneIsForest()){
+    const tone=forestTone();
+    if(tone==='mist'){
+      base.addColorStop(0,'rgba(28,34,26,0.30)');
+      base.addColorStop(1,'rgba(4,8,6,0.78)');
+    } else if(tone==='dusk'){
+      base.addColorStop(0,'rgba(34,38,24,0.30)');
+      base.addColorStop(1,'rgba(6,8,4,0.72)');
+    } else {
+      base.addColorStop(0,'rgba(24,42,26,0.32)');
+      base.addColorStop(1,'rgba(2,7,4,0.70)');
+    }
   } else {
     const deep=Math.min(game.depth,6)/6;
     base.addColorStop(0,'rgba('+(18+deep*18)+','+(20-deep*6)+','+(30+deep*12)+',0.14)');
@@ -1710,7 +2073,7 @@ function drawFog(camx,camy){
     const y=camy + ((i*137 + game.t*12) % (VIEW_H+180)) - 90;
     const x=camx + Math.sin(game.t*0.35+i)*90;
     const g=ctx.createRadialGradient(x+VIEW_W*0.5,y,20,x+VIEW_W*0.5,y,VIEW_W*0.48);
-    g.addColorStop(0, (game.scene==='forest'||game.scene==='camp')?'rgba(82,110,58,0.06)':'rgba(80,88,112,0.045)');
+    g.addColorStop(0, sceneIsTown()?'rgba(120,100,60,0.05)':sceneIsForest()?'rgba(82,110,58,0.06)':'rgba(80,88,112,0.045)');
     g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.fillRect(camx,y-90,VIEW_W,180);
   }
@@ -1813,7 +2176,7 @@ function drawCandles(x,y,n=3){
   }
 }
 
-function drawGothicProp(kind,x,y,seed=0){
+function drawGothicProp(kind,x,y,seed=0,label=''){
   ctx.save();
   ctx.translate(x,y);
   if(kind==='grave'){
@@ -1848,7 +2211,30 @@ function drawGothicProp(kind,x,y,seed=0){
     ctx.fillStyle='#5a351a'; ctx.fillRect(-25,-28,50,18);
     ctx.strokeStyle='#1a0e08'; ctx.strokeRect(-25.5,-28.5,51,19);
     ctx.fillStyle='#d9b45a'; ctx.font='bold 8px Trebuchet MS'; ctx.textAlign='center';
-    ctx.fillText('CRYPT',0,-16);
+    ctx.fillText(label||'CRYPT',0,-16);
+  } else if(kind==='inn'){
+    ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.beginPath(); ctx.ellipse(0,18,38,12,0,0,6.28); ctx.fill();
+    ctx.fillStyle='#5a3a22'; ctx.fillRect(-28,-8,56,26);
+    ctx.fillStyle='#7a5230'; ctx.beginPath(); ctx.moveTo(-32,-8); ctx.lineTo(-18,-28); ctx.lineTo(18,-28); ctx.lineTo(32,-8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#d9b45a'; ctx.font='bold 9px Trebuchet MS'; ctx.textAlign='center'; ctx.fillText('INN',0,-18);
+    drawCandles(-12,8,2); drawCandles(12,8,2);
+  } else if(kind==='chapel'){
+    ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.beginPath(); ctx.ellipse(0,18,34,11,0,0,6.28); ctx.fill();
+    ctx.fillStyle='#4a4a58'; ctx.fillRect(-22,0,44,22);
+    ctx.fillStyle='#6a6a78'; ctx.beginPath(); ctx.moveTo(-26,0); ctx.lineTo(0,-34); ctx.lineTo(26,0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='rgba(217,180,90,0.35)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-28); ctx.lineTo(0,8); ctx.moveTo(-10,-12); ctx.lineTo(10,-12); ctx.stroke();
+    ctx.fillStyle='#d9b45a'; ctx.font='bold 8px Trebuchet MS'; ctx.textAlign='center'; ctx.fillText('CHAPEL',0,-38);
+  } else if(kind==='barrel'){
+    ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(0,10,14,6,0,0,6.28); ctx.fill();
+    ctx.fillStyle='#4a3018'; ctx.fillRect(-12,-8,24,20);
+    ctx.strokeStyle='#6a4828'; ctx.strokeRect(-12.5,-8.5,25,21);
+    ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.moveTo(-12,-2); ctx.lineTo(12,-2); ctx.moveTo(-12,4); ctx.lineTo(12,4); ctx.stroke();
+  } else if(kind==='well'){
+    ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.beginPath(); ctx.ellipse(0,14,20,8,0,0,6.28); ctx.fill();
+    ctx.fillStyle='#3a3838'; ctx.beginPath(); ctx.ellipse(0,2,18,10,0,0,6.28); ctx.fill();
+    ctx.strokeStyle='#5a5858'; ctx.lineWidth=2; ctx.beginPath(); ctx.ellipse(0,2,18,10,0,0,6.28); ctx.stroke();
+    ctx.fillStyle='rgba(90,140,210,0.35)'; ctx.beginPath(); ctx.ellipse(0,1,12,6,0,0,6.28); ctx.fill();
+    ctx.fillStyle='#4a3018'; ctx.fillRect(-16,-12,32,6);
   } else if(kind==='standingStone'){
     ctx.fillStyle='rgba(0,0,0,0.48)'; ctx.beginPath(); ctx.ellipse(0,17,22,8,0,0,6.28); ctx.fill();
     ctx.fillStyle='#30343a'; ctx.beginPath(); ctx.moveTo(-12,16); ctx.lineTo(-9,-18); ctx.quadraticCurveTo(0,-30,10,-18); ctx.lineTo(13,16); ctx.closePath(); ctx.fill();
@@ -1932,7 +2318,7 @@ function drawLandmark(lm){
 }
 
 function drawTileDressing(tx,ty,X,Y,wall){
-  const h=hash2(tx,ty,(game.scene==='forest'||game.scene==='camp')?7:13);
+  const h=hash2(tx,ty,sceneIsOverworld()?7:13);
   if(wall) return;
   if(game.scene==='dungeon'){
     if(h>0.972) drawGothicProp('bones',X+18,Y+24,tx*1000+ty);
@@ -1977,7 +2363,8 @@ function drawForestPath(d){
 }
 
 function drawForestCanopyShadows(camx,camy){
-  if(game.scene!=='forest') return;
+  if(!sceneIsForest()) return;
+  const dark=forestTone()==='bright'?0.28:forestTone()==='dusk'?0.34:0.42;
   ctx.save();
   ctx.globalCompositeOperation='multiply';
   ctx.fillStyle='rgba(0,0,0,0)';
@@ -1986,7 +2373,7 @@ function drawForestCanopyShadows(camx,camy){
     const x=(camx*0.08+h*VIEW_W*1.2)%(VIEW_W+120)-60;
     const y=camy+h*VIEW_H*0.9+Math.sin(game.t*0.2+i)*12;
     const g=ctx.createRadialGradient(x,y,8,x,y,90+h*40);
-    g.addColorStop(0,'rgba(0,0,0,0.38)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    g.addColorStop(0,'rgba(0,0,0,'+dark+')'); g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(x,y,110,48,0.15,0,6.28); ctx.fill();
   }
   ctx.restore();
@@ -1995,29 +2382,38 @@ function drawForestCanopyShadows(camx,camy){
 function drawForestAtmosphere(d){
   ctx.save();
   ctx.globalCompositeOperation='screen';
+  const tone=forestTone();
+  const beamTop=tone==='bright'?'rgba(210,230,170,0.18)':tone==='dusk'?'rgba(180,160,110,0.12)':'rgba(140,150,130,0.10)';
+  const beamMid=tone==='bright'?'rgba(150,190,110,0.06)':tone==='dusk'?'rgba(120,100,70,0.05)':'rgba(90,100,80,0.04)';
   for(let i=0;i<5;i++){
     const x=(8+i*5.5)*TILE + Math.sin(game.t*0.22+i)*22;
     const top=1.8*TILE, bottom=21*TILE;
     const beam=ctx.createLinearGradient(x,top,x+90,bottom);
-    beam.addColorStop(0,'rgba(190,220,150,0.16)');
-    beam.addColorStop(0.45,'rgba(130,180,100,0.05)');
-    beam.addColorStop(1,'rgba(80,120,60,0)');
+    beam.addColorStop(0,beamTop); beam.addColorStop(0.45,beamMid); beam.addColorStop(1,'rgba(80,120,60,0)');
     ctx.fillStyle=beam;
     ctx.beginPath(); ctx.moveTo(x-22,top); ctx.lineTo(x+48,top); ctx.lineTo(x+128,bottom); ctx.lineTo(x+38,bottom); ctx.closePath(); ctx.fill();
+  }
+  if(tone!=='bright'){
+    for(let i=0;i<14;i++){
+      const h=hash2(i,5,21), x=(3+h*28)*TILE + Math.sin(game.t*0.5+i)*10;
+      const y=(4+hash2(i,9,17)*16)*TILE;
+      ctx.fillStyle='rgba(160,170,180,'+(tone==='mist'?0.08:0.04)+')';
+      ctx.beginPath(); ctx.ellipse(x,y,40+h*30,16,0,0,6.28); ctx.fill();
+    }
   }
   for(let i=0;i<22;i++){
     const h=hash2(i,3,11), x=(4+h*26)*TILE + Math.sin(game.t*0.8+i)*14;
     const y=(5+hash2(i,8,17)*15)*TILE + Math.cos(game.t*0.7+i)*11;
-    const a=0.18+Math.sin(game.t*2+i)*0.09;
+    const a=(tone==='bright'?0.18:0.10)+Math.sin(game.t*2+i)*0.09;
     ctx.fillStyle='rgba(180,220,110,'+Math.max(0.04,a)+')';
     ctx.beginPath(); ctx.arc(x,y,1.4+hash2(i,2)*1.8,0,6.28); ctx.fill();
   }
-  if(d.entrance) drawLight(d.entrance.x,d.entrance.y-8,165,'rgba(150,70,220,ALPHA)',0.22);
+  if(d.entrance && game.scene==='forest3') drawLight(d.entrance.x,d.entrance.y-8,165,'rgba(150,70,220,ALPHA)',0.22);
   ctx.restore();
 }
 
 function drawForestForeground(camx,camy){
-  if(game.scene!=='forest') return;
+  if(!sceneIsForest()) return;
   ctx.save();
   const par=camx*0.06;
   ctx.globalAlpha=0.94;
@@ -2037,23 +2433,44 @@ function drawForestForeground(camx,camy){
 }
 
 function drawTutorialMarkers(){
-  if(game.scene!=='forest') return;
+  if(!sceneIsOverworld()) return;
   const p=game.player, d=game.dungeon;
   ctx.save();
   ctx.textAlign='center';
+  if(sceneIsTown() || game.scene==='forest1'){
+    const near=npcNearPlayer(p);
+    if(near){
+      const bob=Math.sin(game.t*4)*3;
+      ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(near.x-58,near.y-near.r-36+bob,116,16);
+      ctx.fillStyle='#d9b45a'; ctx.font='bold 10px Trebuchet MS';
+      ctx.fillText('Click or E to talk',near.x,near.y-near.r-24+bob);
+    }
+    if(sceneIsTown() && stashNearPlayer(p)){
+      const s=d.stash, bob=Math.sin(game.t*3)*2;
+      ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(s.x-52,s.y-38+bob,104,16);
+      ctx.fillStyle='#d9b45a'; ctx.font='bold 10px Trebuchet MS';
+      ctx.fillText('Click stash or press E',s.x,s.y-26+bob);
+    }
+  }
+  if(game.scene==='forest1' && d.exit){
+    const bob=Math.sin(game.t*3)*3;
+    ctx.fillStyle='rgba(0,0,0,0.58)'; ctx.fillRect(d.exit.x-72,d.exit.y-34+bob,144,16);
+    ctx.fillStyle='#7ac83a'; ctx.font='bold 10px Trebuchet MS';
+    ctx.fillText('Follow the path east',d.exit.x,d.exit.y-22+bob);
+  }
   for(const m of game.monsters){
     const bob=Math.sin(game.t*5+m.x)*3;
     ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(m.x-54,m.y-m.r-42+bob,108,16);
     ctx.fillStyle='#d9b45a'; ctx.font='bold 10px Trebuchet MS';
-    ctx.fillText('Hold click: Rage Bolt',m.x,m.y-m.r-30+bob);
+    ctx.fillText('Hold click: Smite',m.x,m.y-m.r-30+bob);
   }
-  if(livingEnemyCount()===0 && d.entrance){
+  if(game.scene==='forest3' && livingEnemyCount()===0 && d.entrance){
     const bob=Math.sin(game.t*4)*4;
     ctx.fillStyle='rgba(0,0,0,0.66)'; ctx.fillRect(d.entrance.x-68,d.entrance.y-122+bob,136,18);
     ctx.fillStyle='#d9b45a'; ctx.font='bold 11px Trebuchet MS';
     ctx.fillText('Enter the Crypt Gate',d.entrance.x,d.entrance.y-109+bob);
   }
-  if(p.life<p.maxLife*0.7){
+  if(p.life<p.maxLife*0.7 && combatScene()){
     ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(p.x-44,p.y-58,88,16);
     ctx.fillStyle='#ff8080'; ctx.font='bold 10px Trebuchet MS';
     ctx.fillText('Q drinks health',p.x,p.y-46);
@@ -2061,22 +2478,7 @@ function drawTutorialMarkers(){
   ctx.restore();
 }
 
-function drawCampProps(d){
-  const f=d.fire;
-  ctx.fillStyle='rgba(0,0,0,0.45)';
-  ctx.beginPath(); ctx.ellipse(f.x,f.y+10,34,14,0,0,6.28); ctx.fill();
-  ctx.fillStyle='#3a2516'; ctx.fillRect(f.x-28,f.y+6,56,8);
-  const flame=1+Math.sin(game.t*8)*0.12;
-  const grd=ctx.createRadialGradient(f.x,f.y,4,f.x,f.y,80*flame);
-  grd.addColorStop(0,'#ffe7a0'); grd.addColorStop(0.22,'#ff8a24bb'); grd.addColorStop(1,'#ff3a0000');
-  ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(f.x,f.y,80*flame,0,6.28); ctx.fill();
-  ctx.fillStyle='#ffca62'; ctx.beginPath(); ctx.moveTo(f.x,f.y-28); ctx.lineTo(f.x-13,f.y+8); ctx.lineTo(f.x+10,f.y+9); ctx.closePath(); ctx.fill();
-  for(let i=0;i<6;i++){
-    const a=game.t*1.4+i, px=f.x+Math.cos(a)*(18+i*3), py=f.y-18-Math.sin(game.t*2+i)*12-i*2;
-    ctx.fillStyle='rgba(255,175,68,0.35)'; ctx.fillRect(px,py,2,2);
-  }
-
-  const e=d.entrance;
+function drawCryptGate(e){
   const gatePulse=0.45+Math.sin(game.t*2.2)*0.15;
   const gateGlow=ctx.createRadialGradient(e.x,e.y-8,6,e.x,e.y-8,92);
   gateGlow.addColorStop(0,'rgba(150,70,220,'+gatePulse+')');
@@ -2099,20 +2501,82 @@ function drawCampProps(d){
   ctx.fillText('CRYPT GATE', e.x, e.y-76);
   ctx.fillStyle='#8a8470'; ctx.font='11px Trebuchet MS';
   ctx.fillText(livingEnemyCount()?'clear the dead first':'walk here to descend', e.x, e.y+44);
+}
 
-  const s=d.stash;
+function drawStashChest(s){
   ctx.fillStyle='#2b1b10'; ctx.fillRect(s.x-22,s.y-12,44,26);
-  ctx.strokeStyle='#7a5426'; ctx.strokeRect(s.x-22,s.y-12,44,26);
+  ctx.strokeStyle='#7a5426'; ctx.lineWidth=2; ctx.strokeRect(s.x-22,s.y-12,44,26);
+  ctx.fillStyle='#d9b45a'; ctx.fillRect(s.x-18,s.y-8,36,4);
   ctx.fillStyle='#d9b45a'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
   ctx.fillText('STASH', s.x, s.y-18);
-  for(const prop of d.props) drawGothicProp(prop.kind, prop.x, prop.y, prop.x+prop.y);
-  if(d.graveyard){
-    drawLight(d.graveyard.x,d.graveyard.y,88,'rgba(140,150,180,ALPHA)',0.10);
-    drawGothicProp('graveyard', d.graveyard.x, d.graveyard.y, d.graveyard.x+d.graveyard.y);
+  if(stashNearPlayer(game.player)) drawLight(s.x,s.y,70,'rgba(217,180,90,ALPHA)',0.14);
+}
+
+function drawNPCs(d){
+  if(!d.npcs) return;
+  for(const n of d.npcs){
+    const bob=Math.sin(game.t*2+n.x)*2;
+    procShadow(0,12,16,6);
+    ctx.fillStyle='#4a5058'; ctx.fillRect(n.x-8,n.y-18+bob,16,22);
+    ctx.fillStyle='#d9b45a'; ctx.fillRect(n.x-10,n.y-20+bob,20,4);
+    ctx.fillStyle='#2a2838'; ctx.beginPath(); ctx.arc(n.x,n.y-24+bob,8,0,6.28); ctx.fill();
     ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
-    ctx.fillText('CAMP GRAVEYARD', d.graveyard.x, d.graveyard.y-52);
+    ctx.fillText(n.name.split(' ')[0], n.x, n.y-34+bob);
+    if(dist(game.player.x,game.player.y,n.x,n.y)<n.r+20){
+      ctx.fillStyle='rgba(217,180,90,0.75)'; ctx.font='bold 9px Trebuchet MS';
+      ctx.fillText('Talk', n.x, n.y+12+bob);
+    }
   }
-  drawLight(f.x,f.y,110,'rgba(255,140,40,ALPHA)',0.22);
+}
+
+function drawNpcDialogue(){
+  const dlg=game.npcDialog;
+  if(!dlg) return;
+  const x=VIEW_W/2-220, y=VIEW_H-150, w=440, h=92;
+  ctx.save();
+  ctx.fillStyle='rgba(4,6,10,0.82)'; ctx.fillRect(x,y,w,h);
+  drawGothicFrame(x,y,w,h,'rgba(217,180,90,0.45)');
+  ctx.textAlign='left';
+  ctx.fillStyle='#d9b45a'; ctx.font='bold 13px Trebuchet MS';
+  ctx.fillText(dlg.npc.name,x+16,y+24);
+  ctx.fillStyle='#d8d4c4'; ctx.font='13px Trebuchet MS';
+  wrapText(dlg.lines[dlg.line],x+16,y+48,w-32,18,'#d8d4c4','13px Trebuchet MS');
+  ctx.fillStyle='#8a8470'; ctx.font='11px Trebuchet MS'; ctx.textAlign='right';
+  ctx.fillText(mobileMode?'Tap — next':'Click or E — next', x+w-16, y+h-14);
+  ctx.restore();
+}
+
+function drawOverworldProps(d){
+  for(const prop of d.props||[]) drawGothicProp(prop.kind, prop.x, prop.y, prop.x+prop.y, prop.label||'');
+  if(sceneIsTown()){
+    drawLight(18*TILE,14*TILE,180,'rgba(255,200,120,ALPHA)',0.12);
+    if(d.stash) drawStashChest(d.stash);
+    if(d.graveyard){
+      drawLight(d.graveyard.x,d.graveyard.y,88,'rgba(217,180,90,ALPHA)',0.08);
+      drawGothicProp('graveyard', d.graveyard.x, d.graveyard.y, d.graveyard.x+d.graveyard.y);
+      ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
+      ctx.fillText('HAMLET GRAVEYARD', d.graveyard.x, d.graveyard.y-52);
+    }
+    if(d.exit){
+      drawGothicProp('sign', d.exit.x-28, d.exit.y, d.exit.x, d.exit.label||'WOOD');
+      ctx.fillStyle='#7ac83a'; ctx.font='bold 11px Trebuchet MS'; ctx.textAlign='center';
+      ctx.fillText('→ '+d.exit.label, d.exit.x, d.exit.y-28);
+    }
+    drawNPCs(d);
+  } else if(sceneIsForest()){
+    if(d.path) drawForestPath(d);
+    if(d.entrance) drawCryptGate(d.entrance);
+    if(d.exit){
+      ctx.fillStyle='#8a8470'; ctx.font='bold 10px Trebuchet MS'; ctx.textAlign='center';
+      ctx.fillText('→ deeper wood', d.exit.x, d.exit.y-24);
+    }
+    if(d.graveyard){
+      drawLight(d.graveyard.x,d.graveyard.y,88,'rgba(140,150,180,ALPHA)',0.10);
+      drawGothicProp('graveyard', d.graveyard.x, d.graveyard.y, d.graveyard.x+d.graveyard.y);
+      ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
+      ctx.fillText('WOOD CROSSING', d.graveyard.x, d.graveyard.y-52);
+    }
+  }
 }
 
 // ---- player armor visuals (gear-driven, procedural) -------------------------
@@ -2127,8 +2591,8 @@ function playerRobeFill(p){
   if(p.hurt>0) return '#ff9c9c';
   if(p.dodge>0) return '#b9c9ff';
   const ar=p.gear.armor, t=gearTier(ar);
-  if(!ar) return '#7460a8';
-  return ['#7460a8','#5e5688','#4a5088','#3a4868','#2a4058','#223848'][Math.min(t,5)];
+  if(!ar) return '#6a7078';
+  return ['#6a7078','#586068','#485058','#384048','#283038','#202830'][Math.min(t,5)];
 }
 function playerAnimPose(p, moving){
   const f=p.animFrame||0;
@@ -2313,13 +2777,13 @@ function drawPlayerGloves(p, step, trim){
 function drawPlayerHead(p, trim){
   const hm=p.gear.helm, ht=gearTier(hm);
   if(!hm){
-    ctx.fillStyle='rgba(20,13,28,0.35)'; ctx.beginPath(); ctx.moveTo(-4,12); ctx.lineTo(1,-10); ctx.lineTo(5,12); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#21172c';
+    ctx.fillStyle='#2a2838';
     ctx.beginPath(); ctx.arc(0,-6,9,Math.PI,0); ctx.lineTo(7,4); ctx.quadraticCurveTo(0,9,-7,4); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.beginPath(); ctx.moveTo(-7,-5); ctx.quadraticCurveTo(0,-15,8,-5); ctx.lineTo(6,2); ctx.quadraticCurveTo(0,6,-6,2); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='rgba(116,96,168,0.75)'; ctx.beginPath(); ctx.arc(-4,-5,5,Math.PI*0.95,Math.PI*1.65); ctx.fill();
+    ctx.fillStyle='rgba(217,180,90,0.55)'; ctx.fillRect(-8,-4,16,3);
+    ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.beginPath(); ctx.moveTo(-7,-5); ctx.quadraticCurveTo(0,-12,8,-5); ctx.lineTo(6,2); ctx.quadraticCurveTo(0,6,-6,2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#c8a868'; ctx.beginPath(); ctx.arc(-4,-5,4,Math.PI*0.95,Math.PI*1.65); ctx.fill();
     ctx.fillStyle='#151018'; ctx.beginPath(); ctx.arc(3,-5,3,0,6.28); ctx.fill();
-    ctx.strokeStyle='rgba(217,180,90,0.28)'; ctx.beginPath(); ctx.arc(0,-6,9,Math.PI*1.03,Math.PI*1.95); ctx.stroke();
+    ctx.strokeStyle='rgba(217,180,90,0.38)'; ctx.beginPath(); ctx.arc(0,-6,9,Math.PI*1.03,Math.PI*1.95); ctx.stroke();
     return;
   }
   const hc=ht>=4?'#3a3848':ht>=2?'#2a2838':'#21172c';
@@ -2370,25 +2834,23 @@ function drawPlayerWeaponOffhand(p, cast, trim, pose){
   else if(ab==='flame'){ sx=6; sy=2; ex=24+cast*11; ey=-6-cast*4; }
   else if(ab==='ward'){ sx=-4; sy=4; ex=-14-cast*6; ey=-4; }
   const staffW=wt>=3?4:wt>=1?3.5:3;
-  const staffCol=wp?(wt>=3?'#6a5028':wt>=1?'#7a5a30':'#8b6a36'):'#8b6a36';
-  ctx.strokeStyle=staffCol; ctx.lineWidth=staffW;
+  const swordCol=wp?(wt>=3?'#8a7850':'#9a8860'):'#9a8860';
+  ctx.strokeStyle=swordCol; ctx.lineWidth=staffW;
   ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+  ctx.fillStyle=swordCol; ctx.fillRect(ex-2,ey-8,4,12);
   if(wp){
     ctx.strokeStyle=gearTrimA(wp,0.55); ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(sx+2,sy-2); ctx.lineTo(ex-2,ey+2); ctx.stroke();
-    if(wt>=2){ ctx.fillStyle=gearTrimA(wp,0.28); ctx.fillRect(ex-5,ey-5,8,8); }
+    if(wt>=2){ ctx.fillStyle=gearTrimA(wp,0.28); ctx.fillRect(ex-4,ey-10,8,4); }
   }
   if(of){
-    const ox=ab==='ward'?-16:-16, oy=-4;
-    if(ot>=2 || of.slot==='offhand'){
-      ctx.fillStyle=ot>=3?'#2a2838':'#21172c';
-      ctx.beginPath(); ctx.arc(ox,oy,ot>=3?9:7,0,6.28); ctx.fill();
-      ctx.strokeStyle=gearTrimA(of,0.78); ctx.lineWidth=2; ctx.beginPath(); ctx.arc(ox,oy,ot>=3?9:7,0,6.28); ctx.stroke();
-      ctx.save(); ctx.globalCompositeOperation='screen';
-      ctx.fillStyle=gearTrimA(of,0.35+cast*0.2);
-      ctx.beginPath(); ctx.arc(ox,oy,5+Math.sin(game.t*8)*1.5,0,6.28); ctx.fill();
-      ctx.restore();
-    }
+    const ox=ab==='ward'?-16:-18, oy=-2;
+    ctx.fillStyle=ot>=3?'#485058':'#3a4048';
+    ctx.fillRect(ox-2,oy-10,4,18);
+    ctx.beginPath(); ctx.moveTo(ox-8,oy-8); ctx.lineTo(ox,oy-14); ctx.lineTo(ox+8,oy-8); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle=gearTrimA(of,0.78); ctx.lineWidth=2;
+    ctx.strokeRect(ox-8.5,oy-8.5,17,17);
+    ctx.fillStyle=gearTrimA(of,0.85); ctx.beginPath(); ctx.arc(ox,oy,3,0,6.28); ctx.fill();
   }
   const orbCols={rage:'#ffe0a0',firebolt:'#ff9040',nova:'#b8e8ff',lightning:'#fff8a0',flame:'#ff6020',ward:'#ff5050'};
   const orbCol=wp?gearTrim(wp):(orbCols[ab]||'#ffe0a0');
@@ -2894,6 +3356,7 @@ function drawSkillGlyph(cx,cy,id,col){
 //  RENDER
 // ============================================================================
 function render(){
+  mobileHit=[];
   const p = game.player, d = game.dungeon;
   ctx.clearRect(0,0,VIEW_W,VIEW_H);
   // camera
@@ -2927,7 +3390,7 @@ function render(){
         ctx.fillStyle='rgba(0,0,0,0.38)'; ctx.fillRect(X,Y+TILE-7,TILE,7);
         if(((tx*19+ty*11)%7)===0){ ctx.fillStyle='rgba(217,180,90,0.08)'; ctx.fillRect(X+7,Y+12,4,18); }
         if(((tx*23+ty*29)%13)===0){ ctx.strokeStyle='rgba(0,0,0,0.38)'; ctx.beginPath(); ctx.moveTo(X+10,Y+7); ctx.lineTo(X+18,Y+25); ctx.lineTo(X+14,Y+38); ctx.stroke(); }
-        if((game.scene==='forest'||game.scene==='camp') && d.entrance){
+        if(game.scene==='forest3' && d.entrance){
           const ex=d.entrance.x/TILE, ey=d.entrance.y/TILE;
           if(Math.hypot(tx-ex,ty-ey)<5.5){
             ctx.fillStyle='rgba(74,106,56,0.38)'; ctx.fillRect(X,Y+TILE-7,TILE,7);
@@ -2941,28 +3404,31 @@ function render(){
       }
     } else {
       const shade = ((tx*7+ty*13)%5);
-      ctx.fillStyle = (game.scene==='forest'||game.scene==='camp')
+      ctx.fillStyle = sceneIsTown()
+        ? ['#2a2418','#322a1c','#241e14','#3a3020','#2e261a'][shade]
+        : sceneIsForest()
         ? ['#172012','#1b2415','#12190f','#202818','#151d12'][shade]
         : ['#15161d','#16171f','#131419','#17181f','#14151c'][shade];
       ctx.fillRect(X,Y,TILE,TILE);
       ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.strokeRect(X+0.5,Y+0.5,TILE,TILE);
       if(((tx*31+ty*17)%9)===0){
-        ctx.strokeStyle=(game.scene==='forest'||game.scene==='camp')?'rgba(100,145,74,0.14)':'rgba(115,120,142,0.12)';
+        ctx.strokeStyle=sceneIsOverworld()?'rgba(100,145,74,0.14)':'rgba(115,120,142,0.12)';
         ctx.beginPath(); ctx.moveTo(X+8,Y+13); ctx.lineTo(X+27,Y+10); ctx.lineTo(X+31,Y+25); ctx.stroke();
       }
       if(((tx*13+ty*23)%17)===0){
-        ctx.fillStyle=(game.scene==='forest'||game.scene==='camp')?'rgba(90,140,70,0.10)':'rgba(70,80,110,0.10)';
+        ctx.fillStyle=sceneIsOverworld()?'rgba(90,140,70,0.10)':'rgba(70,80,110,0.10)';
         ctx.fillRect(X+18,Y+19,3,3);
       }
       drawTileDressing(tx,ty,X,Y,wall);
     }
   }
 
-  if(game.scene==='forest' || game.scene==='camp'){
-    drawForestPath(d);
-    drawForestCanopyShadows(camx,camy);
-    drawCampProps(d);
-    drawForestAtmosphere(d);
+  if(sceneIsOverworld()){
+    drawOverworldProps(d);
+    if(sceneIsForest()){
+      drawForestCanopyShadows(camx,camy);
+      drawForestAtmosphere(d);
+    }
   }
   if(game.scene==='dungeon'){
     for(const lm of d.landmarks||[]) drawLandmark(lm);
@@ -3085,7 +3551,7 @@ function render(){
   ctx.globalAlpha=1;
 
   // ---- vignette / torchlight ----
-  const darkEdge=(game.scene==='forest'||game.scene==='camp')?0.80:0.72;
+  const darkEdge=sceneIsForest()?0.80:sceneIsTown()?0.55:0.72;
   const vg=ctx.createRadialGradient(p.x,p.y,100,p.x,p.y,520);
   vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,'+darkEdge+')');
   ctx.fillStyle=vg; ctx.fillRect(camx,camy,VIEW_W,VIEW_H);
@@ -3099,9 +3565,12 @@ function render(){
 
   ctx.restore();
   drawHUD();
+  if(game.stashOpen) drawStashPanel();
+  if(game.npcDialog) drawNpcDialogue();
   if(game.invOpen) drawInventory();
   if(game.talentOpen) drawTalentTree();
   if(game.attrOpen) drawAttributeScreen();
+  if(mobileMode) drawMobileControls();
   if((game.deathFade||0)>0){
     let a=game.deathFadeIn ? Math.max(0,1-(game.deathFade-0.55)/0.35) : Math.min(1,game.deathFade/0.55);
     if(a>0.02){ ctx.fillStyle='rgba(5,3,10,'+(a*0.92)+')'; ctx.fillRect(0,0,VIEW_W,VIEW_H); }
@@ -3155,6 +3624,7 @@ function drawStaminaBar(p, rad, y){
   ctx.fillText(Math.ceil(p.stamina)+' / '+p.maxStamina, lx+w/2, barY-4);
 }
 function drawDodgeHint(p){
+  if(mobileMode) return;
   const ready = p.dodgeCd<=0 && p.stamina>=DODGE_STAMINA && p.dodge<=0;
   const cx = VIEW_W/2, cy = VIEW_H-74;
   ctx.textAlign='center'; ctx.font='10px Trebuchet MS';
@@ -3167,8 +3637,9 @@ function drawDodgeHint(p){
 function drawPotionRack(x,y,type,count,max,key){
   const col=type==='life'?'#ff6060':'#5a9aff';
   ctx.textAlign='center';
+  const label=mobileMode?(type==='life'?'HP':'MP'):key;
   ctx.fillStyle='#d9b45a'; ctx.font='bold 11px Trebuchet MS';
-  ctx.fillText(key,x+max*13,y-8);
+  ctx.fillText(label,x+max*13,y-8);
   for(let i=0;i<max;i++){
     const px=x+i*26;
     ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(px,y,18,26);
@@ -3177,6 +3648,9 @@ function drawPotionRack(x,y,type,count,max,key){
       ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(px+4,y+8); ctx.lineTo(px+14,y+8); ctx.lineTo(px+12,y+22); ctx.lineTo(px+6,y+22); ctx.closePath(); ctx.fill();
       ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.fillRect(px+6,y+10,3,8);
     }
+  }
+  if(mobileMode){
+    mobileHit.push({x:x-6,y:y-10,w:max*26+12,h:40,type:type==='life'?'potion-life':'potion-mana'});
   }
 }
 let hudHit=[];
@@ -3246,16 +3720,29 @@ function handleHudClick(mx,my){
   return false;
 }
 function drawForestTutorialPanel(){
-  if(game.scene!=='forest') return;
+  if(sceneIsTown()) return;
+  if(sceneIsForestStage(1)){
+    const x=VIEW_W/2-210, y=18, w=420, h=58;
+    ctx.save();
+    ctx.fillStyle='rgba(2,6,4,0.68)'; ctx.fillRect(x,y,w,h);
+    drawGothicFrame(x,y,w,h,'rgba(122,200,58,0.38)');
+    ctx.fillStyle='#d9b45a'; ctx.font='bold 14px Trebuchet MS'; ctx.textAlign='left';
+    ctx.fillText('GRIMHOLLOW WOOD',x+16,y+24);
+    ctx.fillStyle='#b8b09a'; ctx.font='12px Trebuchet MS';
+    ctx.fillText('Left-click to move. Follow the path east — no foes here yet.',x+16,y+46);
+    ctx.restore();
+    return;
+  }
+  if(!sceneIsForestStage(2) && !sceneIsForestStage(3)) return;
   const p=game.player, left=livingEnemyCount();
   const x=VIEW_W/2-210, y=18, w=420, h=82;
   ctx.save();
   ctx.fillStyle='rgba(2,6,4,0.68)'; ctx.fillRect(x,y,w,h);
   drawGothicFrame(x,y,w,h,'rgba(122,200,58,0.38)');
   ctx.fillStyle='#d9b45a'; ctx.font='bold 14px Trebuchet MS'; ctx.textAlign='left';
-  ctx.fillText('FOREST TUTORIAL',x+16,y+24);
+  ctx.fillText(sceneIsForestStage(3)?'CRYPT APPROACH':'DEEP WOODS',x+16,y+24);
   ctx.fillStyle='#b8b09a'; ctx.font='12px Trebuchet MS';
-  const line1=left>0 ? '1. Left-click ground to move. Hold on a Lost Dead to cast Rage Bolt.' : '1. The path is clear. Follow the glow north to the Crypt Gate.';
+  const line1=left>0 ? '1. Left-click ground to move. Hold on a Lost Dead to cast Smite.' : '1. The path is clear. Walk to the Crypt Gate.';
   const line2=p.potions.life<p.potions.maxLife || p.potions.mana<p.potions.maxMana
     ? '2. Pick up red/blue refills, then use Q for health or E for mana.'
     : '2. Potions are full. Q drinks health, E drinks mana.';
@@ -3318,6 +3805,7 @@ function drawHUD(){
     if(ready){ ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.strokeRect(x-20,by-20,40,40); }
     ctx.fillStyle='#d9b45a'; ctx.font='bold 12px Trebuchet MS'; ctx.fillText(s.key, x-18, by-12);
     ctx.fillStyle='#8a8470'; ctx.font='9px Trebuchet MS'; ctx.fillText(s.name, x, by+19);
+    if(mobileMode && !s.locked) mobileHit.push({x:x-30,y:by-30,w:60,h:60,type:'skill',slot:Number(s.key)});
   };
   for(let i=0;i<skills.length;i++) drawSkill(bx-165+i*66, skills[i]);
   ctx.lineWidth=1;
@@ -3332,10 +3820,15 @@ function drawHUD(){
   drawGothicFrame(8,9,190,78,'rgba(217,180,90,0.18)');
   ctx.fillStyle='#d9b45a'; ctx.font='bold 15px Trebuchet MS';
   ctx.fillText('Lv '+p.level, 14, 24);
-  ctx.fillStyle='#b06aff'; ctx.fillText(game.scene==='forest' ? 'Forest Outskirts' : 'Depth '+game.depth, 14, 44);
+  ctx.fillStyle='#b06aff'; ctx.fillText(sceneIsOverworld()?sceneLabel():'Depth '+game.depth, 14, 44);
   ctx.fillStyle='#8a8470'; ctx.font='12px Trebuchet MS';
   const left = livingEnemyCount();
-  ctx.fillText(game.scene==='forest' ? (left>0 ? 'tutorial: '+left+' dead nearby' : 'enter the crypt gate') : (left>0 ? left+' foes remain' : 'cleared — find the portal'), 14, 62);
+  let sub='';
+  if(sceneIsTown()) sub='talk · stash · east to the wood';
+  else if(sceneIsForestStage(1)) sub='follow the path east';
+  else if(sceneIsForestStage(2)||sceneIsForestStage(3)) sub=left>0 ? 'tutorial: '+left+' dead nearby' : (sceneIsForestStage(3)?'enter the crypt gate':'continue deeper');
+  else sub=left>0 ? left+' foes remain' : 'cleared — find the portal';
+  ctx.fillText(sub, 14, 62);
   ctx.fillStyle='#6a6656';
   ctx.fillText('Spell dmg x'+(p.spellMul).toFixed(2)+'  ·  cast x'+(p.castMul).toFixed(2), 14, 80);
   if(game.quest?.status==='complete'){
@@ -3512,7 +4005,7 @@ function drawItemDetails(x,y,w,h,sel){
   ctx.fillText((it.rarity.name||'Common')+' '+SLOT_NAMES[it.slot]+'  |  Item Level '+it.ilvl,x+64,y+52);
   if(it.unique){
     ctx.fillStyle='#c88b3a'; ctx.font='bold 11px Trebuchet MS';
-    ctx.fillText('Unique relic - changes Mage skill behavior',x+64,y+68);
+    ctx.fillText('Unique relic - changes skill behavior',x+64,y+68);
   }
   ctx.fillStyle='#d9b45a'; ctx.font='bold 12px Trebuchet MS';
   ctx.fillText('Power Score '+Math.round(it.score)+(cur&&cur!==it?'  ('+(delta>=0?'+':'')+delta+' vs equipped)':''),x+18,y+88);
@@ -3750,7 +4243,7 @@ function drawAttributeScreen(){
   ctx.fillStyle='#d9b45a'; ctx.font='bold 28px Trebuchet MS';
   ctx.fillText('LEVEL '+p.level, x+W/2, y+42);
   ctx.fillStyle='#b8b09a'; ctx.font='13px Trebuchet MS';
-  ctx.fillText('Allocate attribute points to shape your sorceress before the crypt moves again.', x+W/2, y+66);
+  ctx.fillText('Allocate attribute points to shape your paladin before the crypt moves again.', x+W/2, y+66);
   ctx.fillStyle=p.attrPoints>0?'#d9b45a':'#7ac83a'; ctx.font='bold 15px Trebuchet MS';
   ctx.fillText(p.attrPoints+' attribute point'+(p.attrPoints===1?'':'s')+' remaining', x+W/2, y+92);
 
@@ -3820,6 +4313,116 @@ function loop(){
 }
 
 // ============================================================================
+//  MOBILE CONTROLS
+// ============================================================================
+function canvasPoint(e){
+  const r=canvas.getBoundingClientRect();
+  const t=e.touches?e.touches[0]:e;
+  return {x:(t.clientX-r.left)*(canvas.width/r.width), y:(t.clientY-r.top)*(canvas.height/r.height)};
+}
+function nearestEnemy(p,maxDist=300){
+  let best=null, bd=maxDist;
+  for(const m of game.monsters){
+    if(m.dead) continue;
+    const dd=dist(p.x,p.y,m.x,m.y);
+    if(dd<bd){ bd=dd; best=m; }
+  }
+  return best;
+}
+function mobileAimPoint(p){
+  const foe=nearestEnemy(p);
+  if(foe) return {x:foe.x,y:foe.y};
+  if(input.joy.active && Math.hypot(input.joy.dx,input.joy.dy)>0.12)
+    return {x:p.x+input.joy.dx*220,y:p.y+input.joy.dy*220};
+  return {x:input.wx,y:input.wy};
+}
+function mobileLayout(){
+  const pad=14, joyR=52;
+  return {
+    joy:{cx:pad+joyR+8, cy:VIEW_H-pad-joyR-8, r:joyR},
+    attack:{x:VIEW_W-pad-58, y:VIEW_H-pad-58, w:58, h:58},
+    dodge:{x:VIEW_W-pad-128, y:VIEW_H-pad-54, w:48, h:48},
+    interact:{x:VIEW_W-pad-58, y:VIEW_H-pad-128, w:48, h:48},
+    inv:{x:pad+4, y:pad+4, w:44, h:44}
+  };
+}
+function drawMobileButton(x,y,w,h,label,col,pressed){
+  ctx.save();
+  ctx.fillStyle=pressed?'rgba(18,16,18,0.94)':'rgba(8,9,14,0.78)';
+  ctx.strokeStyle=col; ctx.lineWidth=2;
+  if(ctx.roundRect) ctx.roundRect(x,y,w,h,8); else ctx.rect(x,y,w,h);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle=col; ctx.font='bold '+(w>50?'13':'11')+'px Trebuchet MS'; ctx.textAlign='center';
+  ctx.fillText(label, x+w/2, y+h/2+(w>50?5:4));
+  ctx.restore();
+}
+function drawMobileControls(){
+  if(!mobileMode || !game || game.invOpen || game.talentOpen || game.attrOpen || game.stashOpen) return;
+  const L=mobileLayout(), p=game.player;
+  ctx.save();
+  ctx.fillStyle='rgba(4,5,10,0.35)'; ctx.fillRect(0,VIEW_H-170,VIEW_W*0.42,170);
+  ctx.fillStyle='rgba(4,5,10,0.35)'; ctx.fillRect(VIEW_W*0.58,VIEW_H-170,VIEW_W*0.42,170);
+  ctx.strokeStyle='rgba(217,180,90,0.22)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(L.joy.cx,L.joy.cy,L.joy.r,0,6.28); ctx.stroke();
+  ctx.fillStyle='rgba(217,180,90,0.08)'; ctx.beginPath(); ctx.arc(L.joy.cx,L.joy.cy,L.joy.r-6,0,6.28); ctx.fill();
+  if(input.joy.active){
+    const kx=L.joy.cx+input.joy.dx*(L.joy.r-10), ky=L.joy.cy+input.joy.dy*(L.joy.r-10);
+    ctx.fillStyle='rgba(217,180,90,0.85)'; ctx.beginPath(); ctx.arc(kx,ky,16,0,6.28); ctx.fill();
+  }
+  ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
+  ctx.fillText('MOVE', L.joy.cx, L.joy.cy+L.joy.r+14);
+  mobileHit.push({x:L.joy.cx-L.joy.r,y:L.joy.cy-L.joy.r,w:L.joy.r*2,h:L.joy.r*2,type:'joy'});
+  drawMobileButton(L.attack.x,L.attack.y,L.attack.w,L.attack.h,'SMITE','#d9b45a',input.attack);
+  mobileHit.push({...L.attack,type:'attack'});
+  drawMobileButton(L.dodge.x,L.dodge.y,L.dodge.w,L.dodge.h,'DODGE','#c8d8ff',false);
+  mobileHit.push({...L.dodge,type:'dodge'});
+  if(canWorldInteract(p)){
+    drawMobileButton(L.interact.x,L.interact.y,L.interact.w,L.interact.h,'TALK','#7ac83a',false);
+    mobileHit.push({...L.interact,type:'interact'});
+  }
+  drawMobileButton(L.inv.x,L.inv.y,L.inv.w,L.inv.h,'INV','#d9b45a',game.invOpen);
+  mobileHit.push({...L.inv,type:'inv'});
+  ctx.restore();
+}
+function handleMobileTap(mx,my){
+  if(!mobileMode) return false;
+  for(let i=mobileHit.length-1;i>=0;i--){
+    const h=mobileHit[i];
+    if(mx<h.x||mx>h.x+h.w||my<h.y||my>h.y+h.h) continue;
+    if(h.type==='attack'){
+      input.attack=true;
+      const aim=mobileAimPoint(game.player);
+      input.wx=aim.x; input.wy=aim.y;
+      return true;
+    }
+    if(h.type==='dodge'){ const aim=mobileAimPoint(game.player); input.wx=aim.x; input.wy=aim.y; doDodge(game.player); return true; }
+    if(h.type==='interact'){ tryWorldInteract(game.player); return true; }
+    if(h.type==='inv'){ audio.sfxPlay('ui'); game.invOpen=!game.invOpen; if(game.invOpen){ game.talentOpen=false; game.attrOpen=false; game.stashOpen=false; } return true; }
+    if(h.type==='potion-life'){ usePotion('life'); return true; }
+    if(h.type==='potion-mana'){ usePotion('mana'); return true; }
+    if(h.type==='skill'){ useSkill(h.slot); return true; }
+    return true;
+  }
+  return false;
+}
+function handleJoyTouch(mx,my,tid,start){
+  const L=mobileLayout();
+  if(start){
+    if(dist(mx,my,L.joy.cx,L.joy.cy)>L.joy.r+8) return false;
+    input.joy.active=true; input.joy.tid=tid; input.joy.cx=L.joy.cx; input.joy.cy=L.joy.cy;
+  }
+  if(!input.joy.active || input.joy.tid!==tid) return false;
+  let dx=mx-L.joy.cx, dy=my-L.joy.cy;
+  const mag=Math.hypot(dx,dy), max=L.joy.r-8;
+  if(mag>max){ dx=dx/mag*max; dy=dy/mag*max; }
+  input.joy.dx=dx/max; input.joy.dy=dy/max;
+  return true;
+}
+function releaseJoy(tid){
+  if(input.joy.tid===tid){ input.joy.active=false; input.joy.dx=0; input.joy.dy=0; input.joy.tid=null; }
+}
+
+// ============================================================================
 //  INPUT WIRING
 // ============================================================================
 function screenToWorld(){
@@ -3836,31 +4439,53 @@ canvas.addEventListener('mousedown', e=>{
   e.preventDefault();
   audio.unlock();
   if(!game) return;
-  if(!game.attrOpen && !game.talentOpen && !game.invOpen && e.button===0){
-    const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
-    if(handleHudClick(mx,my)) return;
+  const pt=canvasPoint(e);
+  if(game.stashOpen && e.button===0){ handleStashClick(pt.x,pt.y); return; }
+  if(mobileMode && e.button===0 && handleMobileTap(pt.x,pt.y)) return;
+  if(!game.attrOpen && !game.talentOpen && !game.invOpen && !game.stashOpen && e.button===0){
+    if(handleHudClick(pt.x,pt.y)) return;
   }
-  if(game.attrOpen && e.button===0){
-    const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
-    handleAttributeClick(mx,my);
-    return;
-  }
-  if(game.talentOpen && e.button===0){
-    const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
-    handleTalentClick(mx,my);
-    return;
-  }
-  if(game.invOpen && e.button===0){
-    const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
-    handleInventoryClick(mx,my);
-    return;
-  }
+  if(game.attrOpen && e.button===0){ handleAttributeClick(pt.x,pt.y); return; }
+  if(game.talentOpen && e.button===0){ handleTalentClick(pt.x,pt.y); return; }
+  if(game.invOpen && e.button===0){ handleInventoryClick(pt.x,pt.y); return; }
   if(e.button===0) input.left=true;
   if(e.button===2) input.right=true;
 });
 window.addEventListener('mouseup', e=>{
-  if(e.button===0) input.left=false;
+  if(e.button===0){ input.left=false; input.attack=false; }
   if(e.button===2) input.right=false;
+});
+canvas.addEventListener('touchstart', e=>{
+  e.preventDefault(); audio.unlock();
+  if(!game) return;
+  for(const t of e.changedTouches){
+    const pt=canvasPoint({clientX:t.clientX,clientY:t.clientY});
+    input.mx=pt.x; input.my=pt.y; if(game.player) screenToWorld();
+    if(game.stashOpen){ handleStashClick(pt.x,pt.y); continue; }
+    if(handleJoyTouch(pt.x,pt.y,t.identifier,true)) continue;
+    if(handleMobileTap(pt.x,pt.y)) continue;
+    if(!game.attrOpen && !game.talentOpen && !game.invOpen && handleHudClick(pt.x,pt.y)) continue;
+    if(game.attrOpen){ handleAttributeClick(pt.x,pt.y); continue; }
+    if(game.talentOpen){ handleTalentClick(pt.x,pt.y); continue; }
+    if(game.invOpen){ handleInventoryClick(pt.x,pt.y); continue; }
+    input.attack=true;
+  }
+},{passive:false});
+canvas.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const pt=canvasPoint({clientX:t.clientX,clientY:t.clientY});
+    if(handleJoyTouch(pt.x,pt.y,t.identifier,false)) continue;
+    input.mx=pt.x; input.my=pt.y; if(game&&game.player) screenToWorld();
+  }
+},{passive:false});
+canvas.addEventListener('touchend', e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){ releaseJoy(t.identifier); input.attack=false; }
+},{passive:false});
+canvas.addEventListener('touchcancel', e=>{
+  for(const t of e.changedTouches) releaseJoy(t.identifier);
+  input.attack=false;
 });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
 window.addEventListener('keydown', e=>{
@@ -3870,7 +4495,11 @@ window.addEventListener('keydown', e=>{
   if(!game) return;
   if(game.attrOpen) return;
   if(e.key.toLowerCase()==='q'){ e.preventDefault(); usePotion('life'); return; }
-  if(e.key.toLowerCase()==='e'){ e.preventDefault(); usePotion('mana'); return; }
+  if(e.key.toLowerCase()==='e'){
+    e.preventDefault();
+    if(canWorldInteract(game.player) && tryWorldInteract(game.player)) return;
+    usePotion('mana'); return;
+  }
   if(/^[1-6]$/.test(e.key)){ e.preventDefault(); useSkill(Number(e.key)); }
   if(e.code==='Space'){ e.preventDefault(); if(!game.invOpen && !game.talentOpen) doDodge(game.player); }
   if(e.key.toLowerCase()==='i'){ audio.sfxPlay('ui'); game.invOpen=!game.invOpen; if(game.invOpen){ game.talentOpen=false; game.attrOpen=false; } input.left=input.right=false; }
