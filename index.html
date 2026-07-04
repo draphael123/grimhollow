@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grimhollow — v0</title>
+<style>
+  :root{ --gold:#d9b45a; --blood:#a02020; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ height:100%; background:#05060a; overflow:hidden;
+    font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#e8e2d0; cursor:crosshair; }
+  #wrap{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas{ display:block; background:#0a0b10; image-rendering:pixelated; }
+  #hint{ position:fixed; top:8px; left:50%; transform:translateX(-50%);
+    font-size:12px; letter-spacing:.5px; color:#8a8470; text-shadow:0 1px 2px #000;
+    pointer-events:none; opacity:.85; z-index:5; text-align:center; }
+  #hint b{ color:var(--gold); }
+  #overlay{ position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; background:radial-gradient(circle at 50% 40%, #12101a, #05060a 70%);
+    z-index:20; text-align:center; padding:20px; }
+  #overlay h1{ font-size:52px; letter-spacing:6px; color:var(--gold);
+    text-shadow:0 2px 20px #000, 0 0 40px #6a4a10; margin-bottom:6px; }
+  #overlay .sub{ color:#9a9480; }
+  #overlay p{ color:#b6b0a0; max-width:520px; line-height:1.6; margin:10px 0; font-size:14px; }
+  #overlay .keys{ color:#8a8470; font-size:13px; margin-top:14px; line-height:2; }
+  #overlay .keys b{ color:var(--gold); }
+  #startBtn{ margin-top:24px; padding:12px 40px; font-size:18px; letter-spacing:2px;
+    background:linear-gradient(#3a2a12,#241a0c); color:var(--gold); border:1px solid #6a4a1a;
+    border-radius:4px; cursor:pointer; text-transform:uppercase; transition:.15s; }
+  #startBtn:hover{ background:linear-gradient(#4a3418,#2e2210); box-shadow:0 0 24px #6a4a1080; }
+  .dead h1{ color:var(--blood); text-shadow:0 2px 20px #000, 0 0 40px #6a1010; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="hint">
+  <b>Left-click</b> move · left-click a foe to cast <b>Firebolt</b> · <b>Right-click</b> Frost Nova · <b>Space</b> dodge roll · <b>I</b> inventory
+</div>
+<div id="overlay">
+  <h1>GRIMHOLLOW</h1>
+  <p>A sorceress descends into the sunless crypt. Wade into the dead, delete the pack, take what drops — and dive deeper.</p>
+  <div class="keys">
+    <b>Left-click</b> — move, or hold on a foe to cast Firebolt<br>
+    <b>Right-click</b> — Frost Nova (freezes &amp; shatters the crowd)<br>
+    <b>Spacebar</b> — dodge roll toward cursor (brief invulnerability)<br>
+    <b>I</b> — inventory &amp; gear · click a bag item to equip
+  </div>
+  <button id="startBtn">Descend</button>
+</div>
+<script>
+"use strict";
+// ============================================================================
+//  GRIMHOLLOW v0 — D2-style caster ARPG. Single file. Working title.
+// ============================================================================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const TILE = 40;                 // world units per tile
+let VIEW_W = 960, VIEW_H = 600;  // canvas pixel size (set on resize)
+
+function resize(){
+  VIEW_W = Math.min(window.innerWidth,  1200);
+  VIEW_H = Math.min(window.innerHeight, 760);
+  canvas.width = VIEW_W; canvas.height = VIEW_H;
+}
+window.addEventListener('resize', resize); resize();
+
+// ---- tiny deterministic-ish RNG helpers ------------------------------------
+const rand  = (a=1,b=0)=> b ? a+Math.random()*(b-a) : Math.random()*a;
+const randi = (a,b)=> Math.floor(rand(a,b+1));
+const pick  = arr => arr[Math.floor(Math.random()*arr.length)];
+const chance= p => Math.random()<p;
+const clamp = (v,a,b)=> v<a?a:v>b?b:v;
+const dist  = (ax,ay,bx,by)=> Math.hypot(ax-bx,ay-by);
+const lerp  = (a,b,t)=> a+(b-a)*t;
+const now   = ()=> performance.now()/1000;
+
+// ============================================================================
+//  GAME STATE
+// ============================================================================
+let game = null;      // holds the whole run
+let running = false;
+let lastT = 0;
+
+const input = {
+  mx:0, my:0,          // mouse screen pos
+  wx:0, wy:0,          // mouse world pos
+  left:false, right:false,
+  keys:{},
+};
+
+// ============================================================================
+//  DUNGEON GENERATION — rooms + corridors on a tile grid
+// ============================================================================
+function genDungeon(depth){
+  const W = 44 + Math.min(depth*2,16), H = 40 + Math.min(depth*2,16);
+  const grid = new Array(W*H).fill(1);          // 1 = wall, 0 = floor
+  const rooms = [];
+  const idx = (x,y)=> y*W+x;
+  const carveRoom = (rx,ry,rw,rh)=>{
+    for(let y=ry;y<ry+rh;y++) for(let x=rx;x<rx+rw;x++)
+      if(x>0&&y>0&&x<W-1&&y<H-1) grid[idx(x,y)] = 0;
+  };
+  const carveH = (x1,x2,y)=>{ for(let x=Math.min(x1,x2);x<=Math.max(x1,x2);x++){ grid[idx(x,y)]=0; grid[idx(x,y+1)]=0; } };
+  const carveV = (y1,y2,x)=>{ for(let y=Math.min(y1,y2);y<=Math.max(y1,y2);y++){ grid[idx(x,y)]=0; grid[idx(x+1,y)]=0; } };
+
+  const target = 6 + Math.min(depth,6);
+  for(let i=0;i<target*4 && rooms.length<target;i++){
+    const rw = randi(5,9), rh = randi(5,8);
+    const rx = randi(2,W-rw-2), ry = randi(2,H-rh-2);
+    let ok = true;
+    for(const r of rooms)
+      if(rx < r.x+r.w+2 && rx+rw+2 > r.x && ry < r.y+r.h+2 && ry+rh+2 > r.y){ ok=false; break; }
+    if(!ok) continue;
+    carveRoom(rx,ry,rw,rh);
+    rooms.push({x:rx,y:ry,w:rw,h:rh, cx:rx+(rw>>1), cy:ry+(rh>>1)});
+  }
+  // connect rooms in order
+  for(let i=1;i<rooms.length;i++){
+    const a=rooms[i-1], b=rooms[i];
+    if(chance(0.5)){ carveH(a.cx,b.cx,a.cy); carveV(a.cy,b.cy,b.cx); }
+    else          { carveV(a.cy,b.cy,a.cx); carveH(a.cx,b.cx,b.cy); }
+  }
+  return {W,H,grid,rooms,
+    solid:(tx,ty)=> tx<0||ty<0||tx>=W||ty>=H || grid[ty*W+tx]===1 };
+}
+
+// world-point walkability (circle vs grid)
+function walkable(d, x, y, r=12){
+  for(const [ox,oy] of [[-r,-r],[r,-r],[-r,r],[r,r],[0,0]]){
+    const tx = Math.floor((x+ox)/TILE), ty = Math.floor((y+oy)/TILE);
+    if(d.solid(tx,ty)) return false;
+  }
+  return true;
+}
+
+// ============================================================================
+//  ITEMS & AFFIXES — the engine of expansion
+// ============================================================================
+const AFFIXES = [
+  {k:'spell',  label:'% Spell Damage', min:8,  max:24, suffix:'%'},
+  {k:'life',   label:'Max Life',       min:12, max:45},
+  {k:'mana',   label:'Max Mana',       min:8,  max:30},
+  {k:'lregen', label:'Life Regen',     min:1,  max:4},
+  {k:'mregen', label:'Mana Regen',     min:1,  max:5},
+  {k:'mspeed', label:'% Move Speed',   min:4,  max:12, suffix:'%'},
+  {k:'cast',   label:'% Cast Speed',   min:5,  max:16, suffix:'%'},
+];
+const SLOTS = ['weapon','armor','amulet','ring'];
+const SLOT_NAMES = { weapon:'Staff', armor:'Robe', amulet:'Amulet', ring:'Ring' };
+const RARITIES = [
+  {k:'common', name:'',          col:'#d8d4c4', n:0, w:50},
+  {k:'magic',  name:'Enchanted', col:'#6aa8ff', n:1, w:32},
+  {k:'rare',   name:'Cursed',    col:'#f0d060', n:2, w:14},
+  {k:'epic',   name:'Ancient',   col:'#d068ff', n:3, w:4},
+];
+const ITEM_NOUNS = { weapon:['Rod','Staff','Cane','Scepter','Wand'],
+  armor:['Robe','Vestment','Shroud','Garb'], amulet:['Amulet','Pendant','Charm','Talisman'],
+  ring:['Ring','Band','Loop','Signet'] };
+const ITEM_ADJ = ['Grim','Ashen','Hollow','Sunless','Ember','Frost','Wraith','Bone','Vile','Elder'];
+
+function rollItem(depth){
+  const slot = pick(SLOTS);
+  let rr = Math.random()*100, rarity = RARITIES[0];
+  for(const R of RARITIES){ if(rr < R.w){ rarity=R; break; } rr -= R.w; }
+  const it = { slot, rarity, name:'', affixes:[], ilvl:depth };
+  // base implicit stat scales the slot's identity
+  if(slot==='weapon') it.affixes.push({k:'spell', label:'% Spell Damage', v: randi(10,20)+depth*2, suffix:'%'});
+  if(slot==='armor')  it.affixes.push({k:'life',  label:'Max Life', v: randi(15,30)+depth*3});
+  const pool = AFFIXES.slice();
+  for(let i=0;i<rarity.n;i++){
+    const a = pool.splice(randi(0,pool.length-1),1)[0]; if(!a) break;
+    it.affixes.push({k:a.k, label:a.label, v: randi(a.min,a.max)+Math.floor(depth*0.7), suffix:a.suffix||''});
+  }
+  const noun = pick(ITEM_NOUNS[slot]);
+  it.name = (rarity.n>=2 ? pick(ITEM_ADJ)+' ' : (rarity.name?rarity.name+' ':'')) + noun;
+  it.score = it.affixes.reduce((s,a)=> s + a.v*(a.k==='spell'?3:a.k==='life'?1:1.5), 0) + rarity.n*10;
+  return it;
+}
+
+// ============================================================================
+//  PLAYER
+// ============================================================================
+function newPlayer(){
+  return {
+    x:0,y:0, r:13, speed:170, dir:0,
+    level:1, xp:0, xpNext:20,
+    life:120, maxLife:120, mana:60, maxMana:60,
+    lregen:2, mregen:6,
+    baseSpell:14,
+    gear:{ weapon:null, armor:null, amulet:null, ring:null },
+    bag:[],
+    // movement / combat runtime
+    moveTx:null, moveTy:null,
+    dodge:0, dodgeCd:0, dodgeDx:0, dodgeDy:0,
+    castCd:0, novaCd:0, hurt:0, trail:[],
+    dead:false,
+  };
+}
+// derive totals from gear
+function stat(p, key){
+  let v = 0;
+  for(const s of SLOTS){ const it=p.gear[s]; if(!it) continue;
+    for(const a of it.affixes) if(a.k===key) v += a.v; }
+  return v;
+}
+function recompute(p){
+  const life = 120 + (p.level-1)*18 + stat(p,'life');
+  const mana = 60  + (p.level-1)*8  + stat(p,'mana');
+  const wasMaxL=p.maxLife, wasMaxM=p.maxMana;
+  p.maxLife=life; p.maxMana=mana;
+  p.life = clamp(p.life + (life-wasMaxL), 1, life);
+  p.mana = clamp(p.mana + (mana-wasMaxM), 0, mana);
+  p.lregen = 2 + stat(p,'lregen');
+  p.mregen = 6 + stat(p,'mregen');
+  p.spellMul = 1 + stat(p,'spell')/100;
+  p.castMul  = 1 + stat(p,'cast')/100;
+  p.speed    = 170 * (1 + stat(p,'mspeed')/100);
+}
+
+// ============================================================================
+//  ENTITIES: monsters, projectiles, effects, loot, floaters
+// ============================================================================
+const MTYPES = {
+  risen:  { name:'Risen',    r:14, hp:34, dmg:8,  speed:78,  col:'#c8c2a8', xp:6,  atkCd:1.1, range:26 },
+  ghoul:  { name:'Ghoul',    r:12, hp:22, dmg:6,  speed:112, col:'#a8d0a0', xp:5,  atkCd:0.8, range:24 },
+  brute:  { name:'Bone Brute',r:20, hp:110,dmg:18, speed:56,  col:'#e0d8b0', xp:20, atkCd:1.5, range:34 },
+};
+function spawnMonster(type, x, y, depth){
+  const t = MTYPES[type];
+  const scale = 1 + depth*0.28;
+  return { type, ...t, x, y,
+    hp: Math.round(t.hp*scale), maxhp: Math.round(t.hp*scale),
+    dmg: Math.round(t.dmg*(1+depth*0.2)),
+    flinch:0, slow:0, atk:0, hurt:0, dead:false, wind:0 };
+}
+
+// ============================================================================
+//  RUN SETUP
+// ============================================================================
+function startRun(){
+  const p = newPlayer();
+  recompute(p);
+  game = { depth:1, player:p, monsters:[], projectiles:[], fx:[], loot:[], floaters:[],
+           shake:0, dungeon:null, cleared:false, portal:null, invOpen:false, t:0, killGoal:0 };
+  buildFloor();
+  running = true; lastT = now();
+  document.getElementById('overlay').style.display = 'none';
+  requestAnimationFrame(loop);
+}
+function buildFloor(){
+  const d = genDungeon(game.depth);
+  game.dungeon = d;
+  const start = d.rooms[0];
+  game.player.x = (start.cx+0.5)*TILE;
+  game.player.y = (start.cy+0.5)*TILE;
+  game.player.moveTx=null; game.player.moveTy=null;
+  game.monsters=[]; game.projectiles=[]; game.fx=[]; game.loot=[]; game.floaters=[];
+  game.cleared=false; game.portal=null;
+  // populate rooms (skip the entry room)
+  for(let i=1;i<d.rooms.length;i++){
+    const r = d.rooms[i];
+    const packSize = randi(3,5) + Math.floor(game.depth*0.6);
+    for(let k=0;k<packSize;k++){
+      const mx = (r.x + rand(1,r.w-1))*TILE;
+      const my = (r.y + rand(1,r.h-1))*TILE;
+      let type = 'risen';
+      const roll = Math.random();
+      if(roll<0.45) type='ghoul';
+      else if(roll>0.9 && game.depth>=1) type='brute';
+      game.monsters.push(spawnMonster(type, mx, my, game.depth));
+    }
+  }
+  game.killGoal = game.monsters.length;
+}
+
+// ============================================================================
+//  CASTING
+// ============================================================================
+function tryFirebolt(p){
+  if(p.castCd>0 || p.mana<4 || p.dodge>0) return;
+  p.mana -= 4;
+  p.castCd = 0.26 / p.castMul;
+  const ang = Math.atan2(input.wy - p.y, input.wx - p.x);
+  const dmg = Math.round((p.baseSpell + p.level*2) * p.spellMul * rand(0.85,1.15));
+  game.projectiles.push({ kind:'firebolt', x:p.x, y:p.y, dx:Math.cos(ang), dy:Math.sin(ang),
+    speed:520, dmg, life:1.1, r:6 });
+  addFx('cast', p.x+Math.cos(ang)*16, p.y+Math.sin(ang)*16, '#ff8a3a');
+}
+function tryNova(p){
+  if(p.novaCd>0 || p.mana<18 || p.dodge>0) return;
+  p.mana -= 18;
+  p.novaCd = 0.9 / p.castMul;
+  const dmg = Math.round((p.baseSpell*1.4 + p.level*2.4) * p.spellMul);
+  const R = 150;
+  for(const m of game.monsters){
+    if(m.dead) continue;
+    const dd = dist(p.x,p.y,m.x,m.y);
+    if(dd < R + m.r){
+      hitMonster(m, Math.round(dmg*rand(0.9,1.1)), p.x, p.y, 220, '#8fd8ff');
+      m.slow = 2.2;
+    }
+  }
+  game.fx.push({ kind:'nova', x:p.x, y:p.y, r:10, max:R, life:0.45, t:0 });
+  game.shake = Math.max(game.shake, 8);
+}
+
+// ============================================================================
+//  COMBAT RESOLUTION
+// ============================================================================
+function hitMonster(m, dmg, fromx, fromy, knock, col){
+  m.hp -= dmg;
+  m.flinch = 0.14; m.hurt = 0.12;
+  addFloat(m.x, m.y-m.r-6, dmg, col||'#ffd86a');
+  spatter(m.x, m.y, col||'#ff5a3a', 6);
+  if(knock){
+    const a = Math.atan2(m.y-fromy, m.x-fromx);
+    const nx = m.x + Math.cos(a)*knock*0.05, ny = m.y + Math.sin(a)*knock*0.05;
+    if(walkable(game.dungeon,nx,ny,m.r)){ m.x=nx; m.y=ny; }
+  }
+  if(m.hp<=0 && !m.dead){ killMonster(m); }
+}
+function killMonster(m){
+  m.dead = true;
+  spatter(m.x, m.y, '#8a1818', 18);
+  addFx('burst', m.x, m.y, m.col);
+  game.shake = Math.max(game.shake, 3);
+  // xp
+  const p = game.player;
+  p.xp += m.xp;
+  while(p.xp >= p.xpNext){ levelUp(p); }
+  // loot
+  const dropChance = m.type==='brute' ? 0.9 : 0.32;
+  if(chance(dropChance)){
+    const it = rollItem(game.depth);
+    game.loot.push({ x:m.x+rand(-8,8), y:m.y+rand(-8,8), it, bob:rand(0,6.28) });
+  }
+  if(chance(0.12)) game.loot.push({ x:m.x+rand(-6,6), y:m.y+rand(-6,6), orb:'life', bob:rand(0,6.28) });
+}
+function levelUp(p){
+  p.xp -= p.xpNext;
+  p.level++;
+  p.xpNext = Math.round(p.xpNext*1.5 + 12);
+  recompute(p);
+  p.life = p.maxLife; p.mana = p.maxMana;   // full heal on level
+  addFloat(p.x, p.y-30, 'LEVEL UP!', '#d9b45a');
+  for(let i=0;i<24;i++){ const a=rand(0,6.28);
+    game.fx.push({kind:'spark',x:p.x,y:p.y,dx:Math.cos(a),dy:Math.sin(a),
+      speed:rand(60,180),life:0.6,t:0,col:'#ffe08a'}); }
+}
+function damagePlayer(p, dmg){
+  if(p.dodge>0) return;              // i-frames
+  p.life -= dmg;
+  p.hurt = 0.25; game.shake = Math.max(game.shake, 5);
+  spatter(p.x,p.y,'#c02020',8);
+  if(p.life<=0 && !p.dead){ p.dead=true; onDeath(); }
+}
+
+// ---- floaters / particles ----
+function addFloat(x,y,txt,col){ game.floaters.push({x,y,txt:''+txt,col,life:0.9,t:0,vy:-34}); }
+function spatter(x,y,col,n){ for(let i=0;i<n;i++){ const a=rand(0,6.28),s=rand(30,150);
+  game.fx.push({kind:'spark',x,y,dx:Math.cos(a),dy:Math.sin(a),speed:s,life:rand(0.25,0.6),t:0,col}); } }
+function addFx(kind,x,y,col){
+  if(kind==='cast'){ for(let i=0;i<5;i++){ const a=rand(0,6.28);
+    game.fx.push({kind:'spark',x,y,dx:Math.cos(a),dy:Math.sin(a),speed:rand(40,110),life:0.3,t:0,col}); } }
+  if(kind==='burst'){ for(let i=0;i<14;i++){ const a=rand(0,6.28);
+    game.fx.push({kind:'spark',x,y,dx:Math.cos(a),dy:Math.sin(a),speed:rand(50,200),life:rand(0.3,0.7),t:0,col}); } }
+}
+
+// ============================================================================
+//  UPDATE
+// ============================================================================
+function update(dt){
+  const p = game.player, d = game.dungeon;
+  game.t += dt;
+  if(game.shake>0) game.shake = Math.max(0, game.shake - dt*30);
+
+  // ---- timers / regen ----
+  p.castCd  = Math.max(0,p.castCd-dt);
+  p.novaCd  = Math.max(0,p.novaCd-dt);
+  p.dodgeCd = Math.max(0,p.dodgeCd-dt);
+  p.hurt    = Math.max(0,p.hurt-dt);
+  if(!p.dead){
+    p.life = Math.min(p.maxLife, p.life + p.lregen*dt);
+    p.mana = Math.min(p.maxMana, p.mana + p.mregen*dt);
+  }
+
+  if(p.dead){ return; }
+
+  // ---- input → action ----
+  // hovering a monster with LEFT held → cast firebolt; else move to point
+  let hoverMon = null;
+  for(const m of game.monsters){ if(m.dead) continue;
+    if(dist(input.wx,input.wy,m.x,m.y) < m.r+8){ hoverMon=m; break; } }
+
+  if(input.left && !game.invOpen){
+    if(hoverMon){ p.moveTx=null; tryFirebolt(p); }
+    else { p.moveTx = input.wx; p.moveTy = input.wy; }
+  }
+  if(input.right && !game.invOpen){ tryNova(p); }
+
+  // ---- dodge ----
+  if(p.dodge>0){
+    p.dodge -= dt;
+    const spd = 460;
+    const nx = p.x + p.dodgeDx*spd*dt, ny = p.y + p.dodgeDy*spd*dt;
+    if(walkable(d,nx,p.y,p.r)) p.x=nx;
+    if(walkable(d,p.x,ny,p.r)) p.y=ny;
+    p.trail.push({x:p.x,y:p.y,t:0});
+  } else if(p.moveTx!=null){
+    // ---- click-to-move ----
+    const dx=p.moveTx-p.x, dy=p.moveTy-p.y, dd=Math.hypot(dx,dy);
+    if(dd>4){
+      p.dir = Math.atan2(dy,dx);
+      const step = Math.min(dd, p.speed*dt);
+      const nx = p.x + Math.cos(p.dir)*step, ny = p.y + Math.sin(p.dir)*step;
+      if(walkable(d,nx,p.y,p.r)) p.x=nx; else p.moveTx=p.x;
+      if(walkable(d,p.x,ny,p.r)) p.y=ny; else p.moveTy=p.y;
+    } else { p.moveTx=null; }
+  }
+  // trail fade
+  for(const t of p.trail) t.t+=dt;
+  p.trail = p.trail.filter(t=>t.t<0.3);
+
+  // ---- projectiles ----
+  for(const pr of game.projectiles){
+    pr.x += pr.dx*pr.speed*dt; pr.y += pr.dy*pr.speed*dt; pr.life-=dt;
+    const tx=Math.floor(pr.x/TILE), ty=Math.floor(pr.y/TILE);
+    if(d.solid(tx,ty)){ pr.life=0; spatter(pr.x,pr.y,'#ff8a3a',4); continue; }
+    for(const m of game.monsters){ if(m.dead) continue;
+      if(dist(pr.x,pr.y,m.x,m.y) < m.r+pr.r){
+        hitMonster(m, pr.dmg, pr.x-pr.dx*10, pr.y-pr.dy*10, 180, '#ffb050');
+        pr.life=0; break; }
+    }
+  }
+  game.projectiles = game.projectiles.filter(pr=>pr.life>0);
+
+  // ---- monsters ----
+  for(const m of game.monsters){
+    if(m.dead) continue;
+    m.flinch=Math.max(0,m.flinch-dt); m.hurt=Math.max(0,m.hurt-dt);
+    m.slow=Math.max(0,m.slow-dt); m.atk=Math.max(0,m.atk-dt);
+    m.wind=Math.max(0,m.wind-dt);
+    const dd = dist(m.x,m.y,p.x,p.y);
+    if(m.flinch<=0){
+      const sp = m.speed * (m.slow>0?0.45:1);
+      if(dd > m.range){
+        // move toward player (with wall slide)
+        const a=Math.atan2(p.y-m.y,p.x-m.x);
+        const nx=m.x+Math.cos(a)*sp*dt, ny=m.y+Math.sin(a)*sp*dt;
+        if(walkable(d,nx,m.y,m.r)) m.x=nx;
+        if(walkable(d,m.x,ny,m.r)) m.y=ny;
+      } else if(m.atk<=0 && m.wind<=0){
+        m.wind = 0.28;               // telegraph
+      }
+    }
+    if(m.wind>0 && m.wind<=dt+0.001){ // windup resolves this frame
+      if(dd < m.range+8){ damagePlayer(p, m.dmg); }
+      m.atk = m.atkCd;
+    }
+    // soft separation so they don't perfectly stack
+    for(const o of game.monsters){ if(o===m||o.dead) continue;
+      const od=dist(m.x,m.y,o.x,o.y), mind=m.r+o.r-2;
+      if(od<mind && od>0.01){ const a=Math.atan2(m.y-o.y,m.x-o.x);
+        const push=(mind-od)*0.5; const nx=m.x+Math.cos(a)*push, ny=m.y+Math.sin(a)*push;
+        if(walkable(d,nx,ny,m.r)){ m.x=nx; m.y=ny; } } }
+  }
+  game.monsters = game.monsters.filter(m=>!m.dead || m.hurt>0);
+  game.monsters = game.monsters.filter(m=>!m.dead);
+
+  // ---- fx ----
+  for(const f of game.fx){
+    f.t+=dt;
+    if(f.kind==='spark'){ f.x+=f.dx*f.speed*dt; f.y+=f.dy*f.speed*dt; f.speed*=0.92; }
+    if(f.kind==='nova'){ f.r = lerp(10, f.max, f.t/f.life); }
+  }
+  game.fx = game.fx.filter(f=> f.kind==='nova' ? f.t<f.life : f.t<f.life);
+
+  // ---- floaters ----
+  for(const fl of game.floaters){ fl.t+=dt; fl.y+=fl.vy*dt; fl.vy*=0.92; }
+  game.floaters = game.floaters.filter(fl=>fl.t<fl.life);
+
+  // ---- loot pickup ----
+  for(const l of game.loot){ l.bob+=dt*3;
+    if(dist(p.x,p.y,l.x,l.y) < 26){
+      if(l.orb==='life'){ p.life=Math.min(p.maxLife,p.life+p.maxLife*0.15);
+        addFloat(p.x,p.y-30,'+HP','#ff6a6a'); l.taken=true; }
+    }
+  }
+  game.loot = game.loot.filter(l=>!l.taken);
+
+  // ---- clear / portal ----
+  if(!game.cleared && game.monsters.length===0){
+    game.cleared=true;
+    const r = d.rooms[d.rooms.length-1];
+    game.portal = { x:(r.cx+0.5)*TILE, y:(r.cy+0.5)*TILE, t:0 };
+    addFloat(p.x,p.y-30,'FLOOR CLEARED','#d9b45a');
+  }
+  if(game.portal){ game.portal.t+=dt;
+    if(dist(p.x,p.y,game.portal.x,game.portal.y)<28){ descend(); }
+  }
+}
+function descend(){ game.depth++; buildFloor();
+  addFloat(game.player.x,game.player.y-30,'DEPTH '+game.depth,'#b06aff'); }
+
+function doDodge(p){
+  if(p.dodgeCd>0 || p.dodge>0) return;
+  const a = Math.atan2(input.wy-p.y, input.wx-p.x);
+  p.dodgeDx=Math.cos(a); p.dodgeDy=Math.sin(a);
+  p.dodge=0.26; p.dodgeCd=0.75; p.trail=[];
+}
+
+// ============================================================================
+//  RENDER
+// ============================================================================
+function render(){
+  const p = game.player, d = game.dungeon;
+  ctx.clearRect(0,0,VIEW_W,VIEW_H);
+  // camera
+  let camx = p.x - VIEW_W/2, camy = p.y - VIEW_H/2;
+  if(game.shake>0){ camx += rand(-game.shake,game.shake); camy += rand(-game.shake,game.shake); }
+  ctx.save(); ctx.translate(-camx,-camy);
+
+  // ---- floor / walls (only visible tiles) ----
+  const t0x=Math.floor(camx/TILE)-1, t0y=Math.floor(camy/TILE)-1;
+  const t1x=t0x+Math.ceil(VIEW_W/TILE)+3, t1y=t0y+Math.ceil(VIEW_H/TILE)+3;
+  for(let ty=t0y;ty<t1y;ty++) for(let tx=t0x;tx<t1x;tx++){
+    if(tx<0||ty<0||tx>=d.W||ty>=d.H) continue;
+    const wall = d.grid[ty*d.W+tx]===1;
+    const X=tx*TILE, Y=ty*TILE;
+    if(wall){
+      // only draw walls adjacent to floor (saves fill, looks like edges)
+      let edge=false;
+      for(const [ox,oy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nx=tx+ox,ny=ty+oy;
+        if(nx>=0&&ny>=0&&nx<d.W&&ny<d.H && d.grid[ny*d.W+nx]===0){edge=true;break;}
+      }
+      ctx.fillStyle = edge ? '#20222e' : '#0d0e14';
+      ctx.fillRect(X,Y,TILE,TILE);
+      if(edge){ ctx.fillStyle='#2c2e3c'; ctx.fillRect(X,Y,TILE,4); }
+    } else {
+      const shade = ((tx*7+ty*13)%5);
+      ctx.fillStyle = ['#15161d','#16171f','#131419','#17181f','#14151c'][shade];
+      ctx.fillRect(X,Y,TILE,TILE);
+      ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.strokeRect(X+0.5,Y+0.5,TILE,TILE);
+    }
+  }
+
+  // ---- portal ----
+  if(game.portal){
+    const g=game.portal, pulse=1+Math.sin(g.t*4)*0.15;
+    const grd=ctx.createRadialGradient(g.x,g.y,4,g.x,g.y,40*pulse);
+    grd.addColorStop(0,'#e0a0ff'); grd.addColorStop(0.5,'#8020c0aa'); grd.addColorStop(1,'#8020c000');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(g.x,g.y,40*pulse,0,6.28); ctx.fill();
+    ctx.fillStyle='#f0d0ff'; ctx.font='11px Trebuchet MS'; ctx.textAlign='center';
+    ctx.fillText('▼ DESCEND', g.x, g.y-46);
+  }
+
+  // ---- loot on ground ----
+  for(const l of game.loot){
+    const by = l.y + Math.sin(l.bob)*3;
+    if(l.orb==='life'){
+      ctx.fillStyle='#ff5a5a'; ctx.beginPath(); ctx.arc(l.x,by,6,0,6.28); ctx.fill();
+      ctx.fillStyle='#ffb0b0'; ctx.beginPath(); ctx.arc(l.x-2,by-2,2,0,6.28); ctx.fill();
+    } else {
+      const col=l.it.rarity.col;
+      ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=10;
+      ctx.beginPath(); ctx.arc(l.x,by,5,0,6.28); ctx.fill(); ctx.shadowBlur=0;
+      // label
+      ctx.font='10px Trebuchet MS'; ctx.textAlign='center';
+      const w=ctx.measureText(l.it.name).width+10;
+      ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(l.x-w/2,by-22,w,13);
+      ctx.fillStyle=col; ctx.fillText(l.it.name, l.x, by-12);
+    }
+  }
+
+  // ---- monsters ----
+  for(const m of game.monsters){
+    // shadow
+    ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.beginPath();
+    ctx.ellipse(m.x,m.y+m.r*0.7,m.r*0.9,m.r*0.4,0,0,6.28); ctx.fill();
+    // windup telegraph
+    if(m.wind>0){ ctx.strokeStyle='#ff5050'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(m.x,m.y,m.r+4,0,6.28); ctx.stroke(); ctx.lineWidth=1; }
+    let col = m.col;
+    if(m.hurt>0) col='#ffffff';
+    if(m.slow>0 && m.hurt<=0) col='#9fd0ff';
+    ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(m.x,m.y,m.r,0,6.28); ctx.fill();
+    // eyes
+    ctx.fillStyle='#401010';
+    ctx.beginPath(); ctx.arc(m.x-m.r*0.3,m.y-m.r*0.2,m.r*0.14,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(m.x+m.r*0.3,m.y-m.r*0.2,m.r*0.14,0,6.28); ctx.fill();
+    // hp bar
+    if(m.hp<m.maxhp){ const bw=m.r*2, hp=m.hp/m.maxhp;
+      ctx.fillStyle='#000'; ctx.fillRect(m.x-bw/2,m.y-m.r-9,bw,4);
+      ctx.fillStyle=hp>0.5?'#7ac83a':hp>0.25?'#e0b030':'#c03030';
+      ctx.fillRect(m.x-bw/2,m.y-m.r-9,bw*hp,4); }
+  }
+
+  // ---- projectiles ----
+  for(const pr of game.projectiles){
+    ctx.save(); ctx.shadowColor='#ff8a3a'; ctx.shadowBlur=14;
+    const grd=ctx.createRadialGradient(pr.x,pr.y,0,pr.x,pr.y,pr.r+3);
+    grd.addColorStop(0,'#fff0c0'); grd.addColorStop(0.5,'#ff8a3a'); grd.addColorStop(1,'#ff3a0000');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(pr.x,pr.y,pr.r+3,0,6.28); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- nova rings ----
+  for(const f of game.fx){ if(f.kind!=='nova') continue;
+    const a = 1-(f.t/f.life);
+    ctx.strokeStyle='rgba(150,220,255,'+a+')'; ctx.lineWidth=6*a+1;
+    ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,6.28); ctx.stroke();
+    ctx.strokeStyle='rgba(220,245,255,'+(a*0.6)+')'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(f.x,f.y,f.r*0.7,0,6.28); ctx.stroke(); ctx.lineWidth=1;
+  }
+
+  // ---- dodge trail ----
+  for(const t of p.trail){ const a=1-t.t/0.3;
+    ctx.fillStyle='rgba(150,180,255,'+(a*0.4)+')';
+    ctx.beginPath(); ctx.arc(t.x,t.y,p.r*a,0,6.28); ctx.fill(); }
+
+  // ---- player ----
+  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.beginPath();
+  ctx.ellipse(p.x,p.y+p.r*0.7,p.r*0.9,p.r*0.4,0,0,6.28); ctx.fill();
+  let pcol = p.dodge>0 ? '#c8d8ff' : (p.hurt>0?'#ff9090':'#b0a0e0');
+  ctx.fillStyle=pcol; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28); ctx.fill();
+  // hood / robe accent
+  ctx.fillStyle='#7060a0';
+  ctx.beginPath(); ctx.arc(p.x+Math.cos(p.dir)*4,p.y+Math.sin(p.dir)*4,p.r*0.55,0,6.28); ctx.fill();
+  // facing staff spark
+  ctx.fillStyle='#ffe0a0';
+  ctx.beginPath(); ctx.arc(p.x+Math.cos(p.dir)*p.r,p.y+Math.sin(p.dir)*p.r,3,0,6.28); ctx.fill();
+
+  // ---- sparks (over entities) ----
+  for(const f of game.fx){ if(f.kind!=='spark') continue;
+    const a=1-f.t/f.life; ctx.globalAlpha=Math.max(0,a);
+    ctx.fillStyle=f.col; ctx.fillRect(f.x-1.5,f.y-1.5,3,3); }
+  ctx.globalAlpha=1;
+
+  // ---- floaters ----
+  ctx.textAlign='center';
+  for(const fl of game.floaters){ const a=1-fl.t/fl.life;
+    ctx.globalAlpha=Math.max(0,a); ctx.fillStyle=fl.col;
+    ctx.font=(typeof fl.txt==='string'&&fl.txt.length>3?'bold 15px':'bold 17px')+' Trebuchet MS';
+    ctx.fillText(fl.txt, fl.x, fl.y); }
+  ctx.globalAlpha=1;
+
+  // ---- vignette / torchlight ----
+  const vg=ctx.createRadialGradient(p.x,p.y,120,p.x,p.y,520);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.72)');
+  ctx.fillStyle=vg; ctx.fillRect(camx,camy,VIEW_W,VIEW_H);
+
+  ctx.restore();
+  drawHUD();
+  if(game.invOpen) drawInventory();
+}
+
+// ============================================================================
+//  HUD
+// ============================================================================
+function orb(cx,cy,rad,frac,c1,c2,label){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,rad,0,6.28); ctx.clip();
+  ctx.fillStyle='#0a0a10'; ctx.fillRect(cx-rad,cy-rad,rad*2,rad*2);
+  const top = cy+rad - rad*2*frac;
+  const g=ctx.createLinearGradient(0,top,0,cy+rad);
+  g.addColorStop(0,c1); g.addColorStop(1,c2);
+  ctx.fillStyle=g; ctx.fillRect(cx-rad,top,rad*2,rad*2*frac);
+  // gloss
+  ctx.fillStyle='rgba(255,255,255,0.12)';
+  ctx.beginPath(); ctx.ellipse(cx-rad*0.3,cy-rad*0.4,rad*0.4,rad*0.22,0,0,6.28); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle='#4a3a1a'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(cx,cy,rad,0,6.28); ctx.stroke(); ctx.lineWidth=1;
+  ctx.fillStyle='#e8e2d0'; ctx.font='bold 12px Trebuchet MS'; ctx.textAlign='center';
+  ctx.fillText(label, cx, cy+rad+16);
+}
+function drawHUD(){
+  const p=game.player;
+  const rad=46, y=VIEW_H-rad-24;
+  orb(rad+24, y, rad, p.life/p.maxLife, '#ff5a5a','#8a1010',
+      Math.ceil(p.life)+' / '+p.maxLife);
+  orb(VIEW_W-rad-24, y, rad, p.mana/p.maxMana, '#5a9aff','#101a6a',
+      Math.ceil(p.mana)+' / '+p.maxMana);
+
+  // skill bar (center)
+  const bx=VIEW_W/2, by=VIEW_H-40;
+  const drawSkill=(x,label,key,cd,cdmax,col,ready)=>{
+    ctx.fillStyle='rgba(10,10,16,0.85)'; ctx.strokeStyle=ready?col:'#444';
+    ctx.lineWidth=2; ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x-26,by-26,52,52,6) : ctx.rect(x-26,by-26,52,52);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle=ready?col:'#666'; ctx.font='bold 18px Trebuchet MS'; ctx.textAlign='center';
+    ctx.fillText(label, x, by+6);
+    if(cd>0){ ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.fillRect(x-26,by-26,52,52*(cd/cdmax)); }
+    ctx.fillStyle='#8a8470'; ctx.font='10px Trebuchet MS'; ctx.fillText(key, x, by+22);
+  };
+  drawSkill(bx-64, '✦', 'L-Click', p.castCd, 0.26/p.castMul, '#ff8a3a', p.mana>=4);
+  drawSkill(bx,    '❄', 'R-Click', p.novaCd, 0.9/p.castMul,  '#5a9aff', p.mana>=18);
+  drawSkill(bx+64, '⟳', 'Space',   p.dodgeCd,0.75,           '#c8d8ff', p.dodgeCd<=0);
+  ctx.lineWidth=1;
+
+  // xp bar (very bottom)
+  ctx.fillStyle='#000'; ctx.fillRect(0,VIEW_H-6,VIEW_W,6);
+  ctx.fillStyle='#d9b45a'; ctx.fillRect(0,VIEW_H-6,VIEW_W*(p.xp/p.xpNext),6);
+
+  // top-left readout
+  ctx.textAlign='left'; ctx.fillStyle='#d9b45a'; ctx.font='bold 15px Trebuchet MS';
+  ctx.fillText('Lv '+p.level, 14, 24);
+  ctx.fillStyle='#b06aff'; ctx.fillText('Depth '+game.depth, 14, 44);
+  ctx.fillStyle='#8a8470'; ctx.font='12px Trebuchet MS';
+  const left = game.monsters.length;
+  ctx.fillText(left>0 ? left+' foes remain' : 'cleared — find the portal', 14, 62);
+  ctx.fillStyle='#6a6656';
+  ctx.fillText('Spell dmg x'+(p.spellMul).toFixed(2)+'  ·  cast x'+(p.castMul).toFixed(2), 14, 80);
+}
+
+// ============================================================================
+//  INVENTORY
+// ============================================================================
+function drawInventory(){
+  const p=game.player;
+  const W=440,H=380, x=(VIEW_W-W)/2, y=(VIEW_H-H)/2;
+  ctx.fillStyle='rgba(6,7,12,0.94)'; ctx.fillRect(x,y,W,H);
+  ctx.strokeStyle='#6a4a1a'; ctx.lineWidth=2; ctx.strokeRect(x,y,W,H); ctx.lineWidth=1;
+  ctx.fillStyle='#d9b45a'; ctx.font='bold 18px Trebuchet MS'; ctx.textAlign='left';
+  ctx.fillText('EQUIPPED', x+20, y+30);
+  ctx.fillText('BAG', x+240, y+30);
+
+  invHit = [];
+  // equipped slots
+  let ey=y+50;
+  for(const s of SLOTS){
+    const it=p.gear[s];
+    ctx.fillStyle='rgba(255,255,255,0.04)'; ctx.fillRect(x+20,ey,200,44);
+    ctx.strokeStyle='#333'; ctx.strokeRect(x+20,ey,200,44);
+    ctx.fillStyle='#7a7460'; ctx.font='10px Trebuchet MS';
+    ctx.fillText(SLOT_NAMES[s].toUpperCase(), x+28, ey+13);
+    if(it){ ctx.fillStyle=it.rarity.col; ctx.font='bold 13px Trebuchet MS';
+      ctx.fillText(trim(it.name,22), x+28, ey+29);
+      ctx.fillStyle='#9a9480'; ctx.font='10px Trebuchet MS';
+      ctx.fillText(affixLine(it), x+28, ey+41); }
+    else { ctx.fillStyle='#555'; ctx.font='italic 12px Trebuchet MS'; ctx.fillText('— empty —', x+28, ey+29); }
+    ey+=50;
+  }
+  // bag
+  let by=y+50, i=0;
+  for(const it of p.bag){
+    const bx=x+240, bw=180, bh=44;
+    ctx.fillStyle='rgba(255,255,255,0.04)'; ctx.fillRect(bx,by,bw,bh);
+    ctx.strokeStyle='#444'; ctx.strokeRect(bx,by,bw,bh);
+    ctx.fillStyle=it.rarity.col; ctx.font='bold 13px Trebuchet MS';
+    ctx.fillText(trim(it.name,22), bx+8, by+18);
+    ctx.fillStyle='#9a9480'; ctx.font='10px Trebuchet MS';
+    ctx.fillText(affixLine(it), bx+8, by+34);
+    // upgrade hint
+    const cur=p.gear[it.slot];
+    if(!cur || it.score>cur.score){ ctx.fillStyle='#7ac83a'; ctx.textAlign='right';
+      ctx.fillText('▲', bx+bw-8, by+18); ctx.textAlign='left'; }
+    invHit.push({x:bx,y:by,w:bw,h:bh, item:it});
+    by+=50; i++;
+    if(i>=6) break;
+  }
+  ctx.fillStyle='#6a6656'; ctx.font='11px Trebuchet MS'; ctx.textAlign='center';
+  ctx.fillText('Click a bag item to equip  ·  press  I  to close', x+W/2, y+H-14);
+  ctx.textAlign='left';
+}
+let invHit=[];
+function trim(s,n){ return s.length>n ? s.slice(0,n-1)+'…' : s; }
+function affixLine(it){
+  return it.affixes.map(a=> '+'+a.v+(a.suffix||'')+' '+a.label.replace('% ','').replace('Max ','')).join('  ');
+}
+function equipFromBag(it){
+  const p=game.player;
+  const idx=p.bag.indexOf(it); if(idx<0) return;
+  p.bag.splice(idx,1);
+  const prev=p.gear[it.slot];
+  p.gear[it.slot]=it;
+  if(prev) p.bag.push(prev);
+  recompute(p);
+  addFloat(p.x,p.y-30,'Equipped '+SLOT_NAMES[it.slot],it.rarity.col);
+}
+
+// ============================================================================
+//  DEATH / LOOP
+// ============================================================================
+function onDeath(){
+  running=false;
+  const ov=document.getElementById('overlay');
+  ov.className='dead'; ov.style.display='flex';
+  ov.innerHTML = '<h1>YOU DIED</h1>'+
+    '<p>The crypt claims another. You reached <b style="color:#b06aff">Depth '+game.depth+
+    '</b> at <b style="color:#d9b45a">Level '+game.player.level+'</b>.</p>'+
+    '<button id="startBtn">Descend Again</button>';
+  document.getElementById('startBtn').onclick=startRun;
+}
+function loop(){
+  if(!running) return;
+  const t=now(); let dt=t-lastT; lastT=t;
+  dt=Math.min(dt,0.05);
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================================
+//  INPUT WIRING
+// ============================================================================
+function screenToWorld(){
+  const p=game.player;
+  input.wx = input.mx + (p.x - VIEW_W/2);
+  input.wy = input.my + (p.y - VIEW_H/2);
+}
+canvas.addEventListener('mousemove', e=>{
+  const r=canvas.getBoundingClientRect();
+  input.mx=e.clientX-r.left; input.my=e.clientY-r.top;
+  if(game&&game.player) screenToWorld();
+});
+canvas.addEventListener('mousedown', e=>{
+  e.preventDefault();
+  if(!game) return;
+  if(game.invOpen && e.button===0){
+    const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+    for(const h of invHit){ if(mx>=h.x&&mx<=h.x+h.w&&my>=h.y&&my<=h.y+h.h){ equipFromBag(h.item); return; } }
+    return;
+  }
+  if(e.button===0) input.left=true;
+  if(e.button===2) input.right=true;
+});
+window.addEventListener('mouseup', e=>{
+  if(e.button===0) input.left=false;
+  if(e.button===2) input.right=false;
+});
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+window.addEventListener('keydown', e=>{
+  input.keys[e.key.toLowerCase()]=true;
+  if(!game) return;
+  if(e.code==='Space'){ e.preventDefault(); if(!game.invOpen) doDodge(game.player); }
+  if(e.key.toLowerCase()==='i'){ game.invOpen=!game.invOpen; input.left=input.right=false; }
+  // auto-pickup loot items into bag with F, or auto on contact:
+});
+window.addEventListener('keyup', e=>{ input.keys[e.key.toLowerCase()]=false; });
+
+// auto-pickup item loot when walking over (separate from orbs handled in update)
+setInterval(()=>{
+  if(!game||!running) return;
+  const p=game.player;
+  for(const l of game.loot){ if(l.it && !l.taken && dist(p.x,p.y,l.x,l.y)<26){
+    if(p.bag.length<24){ p.bag.push(l.it); l.taken=true;
+      addFloat(p.x,p.y-30,l.it.name,l.it.rarity.col); } } }
+},80);
+
+document.getElementById('startBtn').onclick=startRun;
+</script>
+</body>
+</html>
